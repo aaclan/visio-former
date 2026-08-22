@@ -80,12 +80,13 @@ All require `Authorization: Bearer <token>` from `/api/login` or `/api/login/goo
 - `GET /api/videos` — lists stored videos.
 - `GET /api/videos/:id` — returns a short-lived signed URL to read/download the video.
 
-### Form check
+### Form check (server-side, no client page yet)
 
-The "Form Check" page compares a reference video against a video the user uploads. Pipeline for `POST /api/compare`:
+`POST /api/compare` compares a reference video against an uploaded video. No client UI wires into this
+endpoint yet — it's server-only for now. Pipeline:
 
-1. Drop the reference video (e.g. generated with fal) at `server/assets/reference-video.mp4`. The server also serves it back to the client at `GET /reference-video.mp4` for the preview player.
-2. The client uploads the user's video as multipart form data.
+1. Drop the reference video (e.g. generated with fal) at `server/assets/reference-video.mp4`. The server also serves it back at `GET /reference-video.mp4`.
+2. Upload the user's video as multipart form data (field name `video`) to `POST /api/compare`.
 3. The server extracts frames every 0.4s (10 frames, first 4s) from both videos with ffmpeg (`server/src/video.ts` — `captureFrames`, added by @Tiannan). The reference video's first frame is also uploaded to GCS at `reference-frames/reference.jpg` (overwritten each run) — non-fatal if `gcsBucketName` isn't configured.
 4. Each frame sequence is captioned into plain-text descriptions by OpenAI Vision (`server/src/vision.ts` — `describeFrames`), one call per video.
 5. Both sets of descriptions are classified against a fixed set of form categories (`FORM_CLASSIFICATIONS` in `server/src/pioneer.ts`) via a single call to Pioneer's GLiNER2 inference endpoint (`POST https://api.pioneer.ai/inference`).
