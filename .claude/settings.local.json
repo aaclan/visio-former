@@ -23,7 +23,8 @@
       "Bash(gcloud iam service-accounts create *)",
       "Bash(gcloud storage buckets add-iam-policy-binding *)",
       "Bash(mkdir -p ~/secrets)",
-      "Bash(gcloud iam *)"
+      "Bash(gcloud iam *)",
+      "Bash(pkill -f \"tsx watch src/index.ts\")"
     ]
   }
 }

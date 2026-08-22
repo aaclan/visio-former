@@ -67,26 +67,44 @@ export async function registerVideoRoutes(app: FastifyInstance) {
     }));
   });
 
+  app.get("/api/videos/reference", { preHandler: requireAuth }, async (request, reply) => {
+    const username = slugifyUsername(request.username ?? "user");
+    const id = `${username}-exercise`;
+    const url = await getSignedUrlForId(id);
+
+    if (!url) {
+      return reply.code(404).send({ error: "reference video not found" });
+    }
+
+    return { url };
+  });
+
   app.get<{ Params: { id: string } }>(
     "/api/videos/:id",
     { preHandler: requireAuth },
     async (request, reply) => {
-      const bucket = getBucket();
-      const [matches] = await bucket.getFiles({
-        prefix: `${OBJECT_PREFIX}${request.params.id}.`,
-      });
+      const url = await getSignedUrlForId(request.params.id);
 
-      const gcsFile = matches[0];
-      if (!gcsFile) {
+      if (!url) {
         return reply.code(404).send({ error: "video not found" });
       }
-
-      const [url] = await gcsFile.getSignedUrl({
-        action: "read",
-        expires: Date.now() + 15 * 60 * 1000,
-      });
 
       return { url };
     },
   );
+}
+
+async function getSignedUrlForId(id: string): Promise<string | null> {
+  const bucket = getBucket();
+  const [matches] = await bucket.getFiles({ prefix: `${OBJECT_PREFIX}${id}.` });
+
+  const gcsFile = matches[0];
+  if (!gcsFile) return null;
+
+  const [url] = await gcsFile.getSignedUrl({
+    action: "read",
+    expires: Date.now() + 15 * 60 * 1000,
+  });
+
+  return url;
 }

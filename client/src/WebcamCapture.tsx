@@ -25,10 +25,9 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
   const [description, setDescription] = useState('')
   const [submitted, setSubmitted] = useState(false)
   const [isLoadingMedia, setIsLoadingMedia] = useState(false)
-
-  const [referenceUrl, setReferenceUrl] = useState<string | null>(null)
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [generateError, setGenerateError] = useState<string | null>(null)
+  const [referenceVideoUrl, setReferenceVideoUrl] = useState<string | null>(null)
+  const [referenceVideoError, setReferenceVideoError] = useState<string | null>(null)
+  const [isLoadingReferenceVideo, setIsLoadingReferenceVideo] = useState(false)
 
   useEffect(() => {
     if (!submitted) return
@@ -104,9 +103,9 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     if (!description.trim()) return
 
     setSubmitted(true)
-    setGenerateError(null)
-    setReferenceUrl(null)
-    setIsGenerating(true)
+    setReferenceVideoError(null)
+    setReferenceVideoUrl(null)
+    setIsLoadingReferenceVideo(true)
 
     try {
       const response = await fetch('http://localhost:3001/api/exercises/generate', {
@@ -121,15 +120,15 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
       const data = await response.json()
 
       if (!response.ok) {
-        setGenerateError(data.error ?? 'Could not generate the reference video')
+        setReferenceVideoError(data.error ?? 'Could not generate the reference video')
         return
       }
 
-      setReferenceUrl(data.url)
+      setReferenceVideoUrl(data.url)
     } catch {
-      setGenerateError('Could not reach the server')
+      setReferenceVideoError('Could not reach the server')
     } finally {
-      setIsGenerating(false)
+      setIsLoadingReferenceVideo(false)
     }
   }
 
@@ -144,9 +143,9 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     setRecordedUrl(null)
     setUploadedId(null)
     setUploadError(null)
+    setReferenceVideoUrl(null)
+    setReferenceVideoError(null)
     setSubmitted(false)
-    setReferenceUrl(null)
-    setGenerateError(null)
   }
 
   const saveToBucket = async () => {
@@ -227,26 +226,17 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
           <div className="capture-layout">
             <div className="reference-column">
               <h2>Reference video</h2>
-              {referenceUrl ? (
-                <video
-                  src={referenceUrl}
-                  controls
-                  autoPlay
-                  loop
-                  muted
-                  playsInline
-                  width={480}
-                  height={360}
-                />
+              {isLoadingReferenceVideo ? (
+                <div className="reference-video-placeholder">
+                  <p>Generating your reference video — this takes a minute or two…</p>
+                </div>
+              ) : referenceVideoUrl ? (
+                <video src={referenceVideoUrl} controls width={480} height={360} />
               ) : (
                 <div className="reference-video-placeholder">
-                  {isGenerating ? (
-                    <p>Generating your reference video — this takes a minute or two…</p>
-                  ) : (
-                    <p role={generateError ? 'alert' : undefined}>
-                      {generateError ?? 'No reference video yet'}
-                    </p>
-                  )}
+                  <p role={referenceVideoError ? 'alert' : undefined}>
+                    {referenceVideoError ?? 'No reference video yet'}
+                  </p>
                 </div>
               )}
             </div>
