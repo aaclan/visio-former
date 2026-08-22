@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import type { FastifyInstance } from "fastify";
 import { requireAuth } from "./auth.js";
@@ -11,6 +10,10 @@ const MIME_TO_EXT: Record<string, string> = {
   "video/mp4": "mp4",
   "video/webm": "webm",
 };
+
+function slugifyUsername(username: string): string {
+  return username.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "user";
+}
 
 export async function registerVideoRoutes(app: FastifyInstance) {
   app.post("/api/videos", { preHandler: requireAuth }, async (request, reply) => {
@@ -25,7 +28,8 @@ export async function registerVideoRoutes(app: FastifyInstance) {
       return reply.code(415).send({ error: "only video/mp4 or video/webm files are accepted" });
     }
 
-    const id = randomUUID();
+    const username = slugifyUsername(request.username ?? "user");
+    const id = `${username}-user-recording`;
     const objectName = `${OBJECT_PREFIX}${id}.${ext}`;
     const bucket = getBucket();
     const gcsFile = bucket.file(objectName);

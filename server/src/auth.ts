@@ -3,6 +3,12 @@ import jwt from "jsonwebtoken";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { config } from "./config.js";
 
+declare module "fastify" {
+  interface FastifyRequest {
+    username?: string;
+  }
+}
+
 const JWT_SECRET = config.jwtSecret;
 
 // Demo user for local development, sourced from secrets.yaml. Replace with a real user store before production use.
@@ -22,7 +28,8 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
   }
 
   try {
-    jwt.verify(token, JWT_SECRET);
+    const payload = jwt.verify(token, JWT_SECRET);
+    request.username = typeof payload === "object" ? (payload.sub as string) : undefined;
   } catch {
     return reply.code(401).send({ error: "invalid or expired token" });
   }
