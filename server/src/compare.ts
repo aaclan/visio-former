@@ -187,7 +187,10 @@ export async function registerCompareRoutes(app: FastifyInstance) {
           const objectId = `${username}-${exerciseSlug}`;
           referenceImageUrl = await storeReferenceFrame(referenceResult.frames[0].path, objectId);
           const spokenFeedback = await toSpokenFeedback(feedback, request.log);
-          const veed = await generateVeedVideo(referenceImageUrl, spokenFeedback, `${objectId}-advice.mp4`);
+          const veed = await generateVeedVideo(spokenFeedback, {
+            imageUrl: referenceImageUrl,
+            filename: `${objectId}-advice.mp4`,
+          });
           veedVideoUrl = veed.url;
         } catch (err) {
           request.log.warn(err, "failed to generate VEED advice video");
@@ -237,7 +240,10 @@ export async function registerCompareRoutes(app: FastifyInstance) {
       try {
         const imageUrl = await storeImageDataUrl(imageDataUrl, objectId);
         const spokenFeedback = await toSpokenFeedback(feedback, request.log);
-        const veed = await generateVeedVideo(imageUrl, spokenFeedback, `${objectId}-advice.mp4`);
+        const veed = await generateVeedVideo(spokenFeedback, {
+          imageUrl,
+          filename: `${objectId}-advice.mp4`,
+        });
         return { veedVideoUrl: veed.url };
       } catch (err) {
         request.log.error(err, "failed to generate VEED advice video from MediaPipe feedback");
