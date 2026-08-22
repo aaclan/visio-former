@@ -5,12 +5,12 @@ import {
   computeJointAngles,
   drawPoseSkeleton,
   createEmptyJointSamples,
-  averageJointSamples,
-  compareAverageAngles,
+  summarizeSession,
+  compareSessions,
   loadDetachedVideo,
   analyzeVideoAverageAngles,
 } from './pose'
-import type { JointAngles, JointSamples } from './pose'
+import type { JointAngles, JointSamples, SessionStats } from './pose'
 
 const RECORDING_MIME_TYPE = MediaRecorder.isTypeSupported('video/mp4')
   ? 'video/mp4'
@@ -39,12 +39,14 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
   const chunksRef = useRef<Blob[]>([])
   const webcamLandmarkerRef = useRef<PoseLandmarker | null>(null)
   const poseLoopRef = useRef<number | null>(null)
-  // Your angles, sampled live while recording.
+  // Your angles (+ each sample's timestamp, for tempo) sampled live while recording.
   const userAngleSamplesRef = useRef<JointSamples>(createEmptyJointSamples())
-  // The reference video's angles, averaged once (off-DOM, not in real time) whenever it loads —
-  // comparing live frame-by-frame assumed you'd move in lockstep with a pre-rendered video,
-  // which never happens, so instead each side's overall average gets compared once at the end.
-  const referenceAverageAnglesRef = useRef<Partial<Record<keyof JointAngles, number>>>({})
+  const userTimestampsRef = useRef<number[]>([])
+  // The reference video's angle + tempo stats, computed once (off-DOM, not in real time)
+  // whenever it loads — comparing live frame-by-frame assumed you'd move in lockstep with a
+  // pre-rendered video, which never happens, so instead each side's overall stats are compared
+  // once at the end.
+  const referenceStatsRef = useRef<SessionStats>({})
 
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -159,7 +161,8 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
       const webcamVideo = videoRef.current
 
       if (webcamLandmarker && webcamVideo && webcamVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-        const landmarks = webcamLandmarker.detectForVideo(webcamVideo, performance.now()).landmarks[0]
+        const now = performance.now()
+        const landmarks = webcamLandmarker.detectForVideo(webcamVideo, now).landmarks[0]
 
         const webcamCanvas = webcamCanvasRef.current
         if (webcamCanvas && landmarks) {
@@ -172,6 +175,7 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
           for (const joint of Object.keys(angles) as (keyof JointAngles)[]) {
             userAngleSamplesRef.current[joint].push(angles[joint])
           }
+          userTimestampsRef.current.push(now)
         }
       }
 
@@ -194,7 +198,7 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
       const detachedVideo = await loadDetachedVideo(videoUrl)
       const landmarker = await createPoseLandmarker()
       try {
-        referenceAverageAnglesRef.current = await analyzeVideoAverageAngles(detachedVideo, landmarker)
+        referenceStatsRef.current = await analyzeVideoAverageAngles(detachedVideo, landmarker)
       } finally {
         landmarker.close()
       }
@@ -223,6 +227,7 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     setMediapipeVeedUrl(null)
     setMediapipeVeedError(null)
     userAngleSamplesRef.current = createEmptyJointSamples()
+    userTimestampsRef.current = []
 
     const recorder = new MediaRecorder(stream, { mimeType: RECORDING_MIME_TYPE })
     recorder.ondataavailable = (event) => {
@@ -292,10 +297,10 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
 
     // Shown immediately (pure client-side math); the VEED video generation kicked off right
     // after is much slower, so it's deliberately not awaited here — the text feedback below
-    // doesn't wait on it. Compares this session's overall average angles against the
-    // reference's overall average (computed once when it loaded), not paired per-frame.
-    const userAverages = averageJointSamples(userAngleSamplesRef.current)
-    const summary = compareAverageAngles(userAverages, referenceAverageAnglesRef.current)
+    // doesn't wait on it. Compares this session's overall angle + tempo against the
+    // reference's (computed once when it loaded), not paired per-frame.
+    const userStats = summarizeSession(userAngleSamplesRef.current, userTimestampsRef.current)
+    const summary = compareSessions(userStats, referenceStatsRef.current)
     setMediapipeFeedback(summary.feedback)
     setMediapipeCorrect(summary.overallCorrect)
 

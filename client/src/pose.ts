@@ -129,6 +129,41 @@ export function averageJointSamples(samples: JointSamples): Partial<Record<keyof
   return averages
 }
 
+/** Average |angle change| per second between consecutive samples — a tempo proxy, in deg/sec. */
+function averageAngularVelocity(values: number[], timestampsMs: number[]): number {
+  let totalVelocity = 0
+  let count = 0
+  for (let i = 1; i < values.length; i++) {
+    const dtSeconds = (timestampsMs[i] - timestampsMs[i - 1]) / 1000
+    if (dtSeconds <= 0) continue
+    totalVelocity += Math.abs(values[i] - values[i - 1]) / dtSeconds
+    count += 1
+  }
+  return count > 0 ? totalVelocity / count : 0
+}
+
+export interface JointStats {
+  averageAngle: number
+  averageVelocityDegPerSec: number
+}
+
+/** Per-joint angle + tempo, for one full session (a live recording, or one reference video). */
+export type SessionStats = Partial<Record<keyof JointAngles, JointStats>>
+
+/** Combines angle samples with their per-frame timestamps into per-joint angle + tempo stats. */
+export function summarizeSession(samples: JointSamples, timestampsMs: number[]): SessionStats {
+  const stats: SessionStats = {}
+  for (const joint of Object.keys(JOINT_LABELS) as (keyof JointAngles)[]) {
+    const values = samples[joint]
+    if (values.length === 0) continue
+    stats[joint] = {
+      averageAngle: values.reduce((sum, v) => sum + v, 0) / values.length,
+      averageVelocityDegPerSec: averageAngularVelocity(values, timestampsMs),
+    }
+  }
+  return stats
+}
+
 /**
  * Loads a video off-DOM (not attached to the page), for one-off analysis — e.g. sampling the
  * reference video's angles once, independent of whatever is visibly playing.
@@ -159,17 +194,21 @@ function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
 }
 
 /**
- * Samples a video at evenly-spaced points across its full duration and averages the joint
- * angles found — a one-time, non-live analysis, so it doesn't need to happen in real time or
- * in sync with anything else. The landmarker's timestamp argument just needs to keep
- * increasing; it doesn't need to match the video's own currentTime.
+ * Samples a video at evenly-spaced points across its full duration and summarizes the joint
+ * angles + tempo found — a one-time, non-live analysis, so it doesn't need to happen in real
+ * time or in sync with anything else. The landmarker's timestamp argument just needs to keep
+ * increasing; it doesn't need to match the video's own currentTime. Velocity is derived from
+ * the (evenly-spaced, so known) gap between samples — coarser than the live webcam's per-frame
+ * timestamps, but enough for an overall tempo comparison.
  */
 export async function analyzeVideoAverageAngles(
   video: HTMLVideoElement,
   landmarker: PoseLandmarker,
   sampleCount = 15,
-): Promise<Partial<Record<keyof JointAngles, number>>> {
+): Promise<SessionStats> {
   const samples = createEmptyJointSamples()
+  const timestampsMs: number[] = []
+  const sampleIntervalMs = (video.duration * 1000) / sampleCount
 
   for (let i = 0; i < sampleCount; i++) {
     const time = (video.duration * (i + 0.5)) / sampleCount
@@ -181,13 +220,18 @@ export async function analyzeVideoAverageAngles(
       for (const joint of Object.keys(angles) as (keyof JointAngles)[]) {
         samples[joint].push(angles[joint])
       }
+      timestampsMs.push(i * sampleIntervalMs)
     }
   }
 
-  return averageJointSamples(samples)
+  return summarizeSession(samples, timestampsMs)
 }
 
 const CORRECT_THRESHOLD_DEG = 25
+// Below this, the reference joint is basically static — a ratio comparison there is just noise.
+const MIN_REFERENCE_VELOCITY_DEG_PER_SEC = 5
+const TOO_FAST_RATIO = 1.4
+const TOO_SLOW_RATIO = 0.6
 
 export interface AngleSummary {
   averageDelta: Partial<Record<keyof JointAngles, number>>
@@ -195,33 +239,40 @@ export interface AngleSummary {
   feedback: string
 }
 
-/** Compares your session's overall average joint angles against the reference's overall averages. */
-export function compareAverageAngles(
-  userAverages: Partial<Record<keyof JointAngles, number>>,
-  referenceAverages: Partial<Record<keyof JointAngles, number>>,
-): AngleSummary {
+function tempoNote(userVelocity: number, referenceVelocity: number): string | null {
+  if (referenceVelocity < MIN_REFERENCE_VELOCITY_DEG_PER_SEC) return null
+  const ratio = userVelocity / referenceVelocity
+
+  if (ratio > TOO_FAST_RATIO) return 'you moved through it faster than the reference pace'
+  if (ratio < TOO_SLOW_RATIO) return 'you moved through it slower than the reference pace'
+  return null
+}
+
+/** Compares your session's overall angle + tempo per joint against the reference's. */
+export function compareSessions(userStats: SessionStats, referenceStats: SessionStats): AngleSummary {
   const averageDelta: Partial<Record<keyof JointAngles, number>> = {}
   const lines: string[] = []
   let offJointCount = 0
   let trackedJointCount = 0
 
   for (const joint of Object.keys(JOINT_LABELS) as (keyof JointAngles)[]) {
-    const userAvg = userAverages[joint]
-    const referenceAvg = referenceAverages[joint]
-    if (userAvg === undefined || referenceAvg === undefined) continue
+    const user = userStats[joint]
+    const reference = referenceStats[joint]
+    if (!user || !reference) continue
 
     trackedJointCount += 1
-    const delta = Math.abs(userAvg - referenceAvg)
+    const delta = Math.abs(user.averageAngle - reference.averageAngle)
     averageDelta[joint] = delta
+    const tempo = tempoNote(user.averageVelocityDegPerSec, reference.averageVelocityDegPerSec)
 
     if (delta > CORRECT_THRESHOLD_DEG) {
       offJointCount += 1
       lines.push(
-        `${JOINT_LABELS[joint]} averaged ${userAvg.toFixed(0)}° for you vs ${referenceAvg.toFixed(0)}° for the reference — needs correction.`,
+        `${JOINT_LABELS[joint]} averaged ${user.averageAngle.toFixed(0)}° for you vs ${reference.averageAngle.toFixed(0)}° for the reference — needs correction${tempo ? `, and ${tempo}` : ''}.`,
       )
     } else {
       lines.push(
-        `${JOINT_LABELS[joint]} averaged ${userAvg.toFixed(0)}° for you, close to the reference's ${referenceAvg.toFixed(0)}°.`,
+        `${JOINT_LABELS[joint]} averaged ${user.averageAngle.toFixed(0)}° for you, close to the reference's ${reference.averageAngle.toFixed(0)}°${tempo ? `, though ${tempo}` : ''}.`,
       )
     }
   }
