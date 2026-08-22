@@ -73,30 +73,6 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
   margin: 0 0 8px;
 }
 
-.live-pose-feedback {
-  width: 100%;
-  max-width: 984px;
-  padding: 20px 24px;
-  box-sizing: border-box;
-  border-radius: 20px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
-}
-
-.live-pose-feedback h3 {
-  margin: 0 0 10px;
-}
-
-.live-pose-feedback ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 8px 20px;
-  font-variant-numeric: tabular-nums;
-}
-
 .exercise-description {
   display: flex;
   flex-direction: column;

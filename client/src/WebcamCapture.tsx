@@ -4,11 +4,13 @@ import {
   createPoseLandmarker,
   computeJointAngles,
   drawPoseSkeleton,
-  createEmptyDeltaSamples,
-  summarizeAngleDeltas,
-  JOINT_LABELS,
+  createEmptyJointSamples,
+  averageJointSamples,
+  compareAverageAngles,
+  loadDetachedVideo,
+  analyzeVideoAverageAngles,
 } from './pose'
-import type { JointAngles, AngleDeltaSamples } from './pose'
+import type { JointAngles, JointSamples } from './pose'
 
 const RECORDING_MIME_TYPE = MediaRecorder.isTypeSupported('video/mp4')
   ? 'video/mp4'
@@ -29,26 +31,20 @@ interface WebcamCaptureProps {
   token: string
 }
 
-interface JointDelta {
-  user: number
-  reference: number
-  delta: number
-}
-
 function WebcamCapture({ token }: WebcamCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const referenceVideoRef = useRef<HTMLVideoElement>(null)
   const webcamCanvasRef = useRef<HTMLCanvasElement>(null)
-  const referenceCanvasRef = useRef<HTMLCanvasElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
-  // Each video feed needs its own PoseLandmarker instance: detectForVideo() requires
-  // strictly increasing timestamps per instance, and the webcam/reference feeds run on
-  // independent timelines.
   const webcamLandmarkerRef = useRef<PoseLandmarker | null>(null)
-  const referenceLandmarkerRef = useRef<PoseLandmarker | null>(null)
   const poseLoopRef = useRef<number | null>(null)
-  const angleSamplesRef = useRef<AngleDeltaSamples>(createEmptyDeltaSamples())
+  // Your angles, sampled live while recording.
+  const userAngleSamplesRef = useRef<JointSamples>(createEmptyJointSamples())
+  // The reference video's angles, averaged once (off-DOM, not in real time) whenever it loads —
+  // comparing live frame-by-frame assumed you'd move in lockstep with a pre-rendered video,
+  // which never happens, so instead each side's overall average gets compared once at the end.
+  const referenceAverageAnglesRef = useRef<Partial<Record<keyof JointAngles, number>>>({})
 
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -70,7 +66,7 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
   const [isLoadingReferenceVideo, setIsLoadingReferenceVideo] = useState(false)
   const [poseModelsReady, setPoseModelsReady] = useState(false)
   const [poseError, setPoseError] = useState<string | null>(null)
-  const [liveAngleDeltas, setLiveAngleDeltas] = useState<Record<keyof JointAngles, JointDelta> | null>(null)
+  const [isAnalyzingReference, setIsAnalyzingReference] = useState(false)
   const [mediapipeFeedback, setMediapipeFeedback] = useState<string | null>(null)
   const [mediapipeCorrect, setMediapipeCorrect] = useState<boolean | null>(null)
   const [isMediapipeVeedGenerating, setIsMediapipeVeedGenerating] = useState(false)
@@ -117,15 +113,13 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     if (!submitted) return
 
     let active = true
-    Promise.all([createPoseLandmarker(), createPoseLandmarker()])
-      .then(([webcamLandmarker, referenceLandmarker]) => {
+    createPoseLandmarker()
+      .then((landmarker) => {
         if (!active) {
-          webcamLandmarker.close()
-          referenceLandmarker.close()
+          landmarker.close()
           return
         }
-        webcamLandmarkerRef.current = webcamLandmarker
-        referenceLandmarkerRef.current = referenceLandmarker
+        webcamLandmarkerRef.current = landmarker
         setPoseModelsReady(true)
       })
       .catch((err: unknown) => {
@@ -139,9 +133,7 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
         poseLoopRef.current = null
       }
       webcamLandmarkerRef.current?.close()
-      referenceLandmarkerRef.current?.close()
       webcamLandmarkerRef.current = null
-      referenceLandmarkerRef.current = null
       setPoseModelsReady(false)
     }
   }, [submitted])
@@ -158,47 +150,28 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     }
   }, [referenceVideoUrl])
 
-  const startPoseComparisonLoop = () => {
+  // Only tracks your own angles live — the reference side is analyzed once, separately (see
+  // analyzeReferenceVideo), since comparing frame-by-frame in real time assumed you'd move in
+  // lockstep with a pre-rendered video, which realistically never happens.
+  const startPoseTrackingLoop = () => {
     const step = () => {
       const webcamLandmarker = webcamLandmarkerRef.current
-      const referenceLandmarker = referenceLandmarkerRef.current
       const webcamVideo = videoRef.current
-      const referenceVideo = referenceVideoRef.current
 
-      if (
-        webcamLandmarker &&
-        referenceLandmarker &&
-        webcamVideo &&
-        referenceVideo &&
-        !referenceVideo.paused &&
-        referenceVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
-      ) {
-        const now = performance.now()
-        const userLandmarks = webcamLandmarker.detectForVideo(webcamVideo, now).landmarks[0]
-        const referenceLandmarks = referenceLandmarker.detectForVideo(referenceVideo, now).landmarks[0]
+      if (webcamLandmarker && webcamVideo && webcamVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        const landmarks = webcamLandmarker.detectForVideo(webcamVideo, performance.now()).landmarks[0]
 
         const webcamCanvas = webcamCanvasRef.current
-        if (webcamCanvas && userLandmarks) {
+        if (webcamCanvas && landmarks) {
           const ctx = webcamCanvas.getContext('2d')
-          if (ctx) drawPoseSkeleton(ctx, userLandmarks, webcamCanvas.width, webcamCanvas.height)
-        }
-        const referenceCanvas = referenceCanvasRef.current
-        if (referenceCanvas && referenceLandmarks) {
-          const ctx = referenceCanvas.getContext('2d')
-          if (ctx) drawPoseSkeleton(ctx, referenceLandmarks, referenceCanvas.width, referenceCanvas.height)
+          if (ctx) drawPoseSkeleton(ctx, landmarks, webcamCanvas.width, webcamCanvas.height)
         }
 
-        const userAngles = userLandmarks ? computeJointAngles(userLandmarks) : null
-        const referenceAngles = referenceLandmarks ? computeJointAngles(referenceLandmarks) : null
-
-        if (userAngles && referenceAngles) {
-          const deltas = {} as Record<keyof JointAngles, JointDelta>
-          for (const joint of Object.keys(userAngles) as (keyof JointAngles)[]) {
-            const delta = userAngles[joint] - referenceAngles[joint]
-            deltas[joint] = { user: userAngles[joint], reference: referenceAngles[joint], delta }
-            angleSamplesRef.current[joint].push(Math.abs(delta))
+        const angles = landmarks ? computeJointAngles(landmarks) : null
+        if (angles) {
+          for (const joint of Object.keys(angles) as (keyof JointAngles)[]) {
+            userAngleSamplesRef.current[joint].push(angles[joint])
           }
-          setLiveAngleDeltas(deltas)
         }
       }
 
@@ -207,10 +180,28 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     poseLoopRef.current = requestAnimationFrame(step)
   }
 
-  const stopPoseComparisonLoop = () => {
+  const stopPoseTrackingLoop = () => {
     if (poseLoopRef.current !== null) {
       cancelAnimationFrame(poseLoopRef.current)
       poseLoopRef.current = null
+    }
+  }
+
+  /** Samples the reference video once, off-DOM, right when it loads — not tied to recording at all. */
+  const analyzeReferenceVideo = async (videoUrl: string) => {
+    setIsAnalyzingReference(true)
+    try {
+      const detachedVideo = await loadDetachedVideo(videoUrl)
+      const landmarker = await createPoseLandmarker()
+      try {
+        referenceAverageAnglesRef.current = await analyzeVideoAverageAngles(detachedVideo, landmarker)
+      } finally {
+        landmarker.close()
+      }
+    } catch (err) {
+      setPoseError(err instanceof Error ? err.message : 'Could not analyze the reference video')
+    } finally {
+      setIsAnalyzingReference(false)
     }
   }
 
@@ -227,12 +218,11 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     setUploadError(null)
     setCompareFeedback(null)
     setCompareError(null)
-    setLiveAngleDeltas(null)
     setMediapipeFeedback(null)
     setMediapipeCorrect(null)
     setMediapipeVeedUrl(null)
     setMediapipeVeedError(null)
-    angleSamplesRef.current = createEmptyDeltaSamples()
+    userAngleSamplesRef.current = createEmptyJointSamples()
 
     const recorder = new MediaRecorder(stream, { mimeType: RECORDING_MIME_TYPE })
     recorder.ondataavailable = (event) => {
@@ -248,10 +238,9 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     mediaRecorderRef.current = recorder
     setIsRecording(true)
 
-    if (poseModelsReady) {
-      void referenceVideoRef.current?.play().catch(() => {})
-      startPoseComparisonLoop()
-    }
+    // Purely a visual aid to follow along now — no longer analyzed live.
+    void referenceVideoRef.current?.play().catch(() => {})
+    if (poseModelsReady) startPoseTrackingLoop()
   }
 
   const generateMediapipeVeed = async (feedback: string) => {
@@ -298,13 +287,15 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
   const stopRecording = () => {
     mediaRecorderRef.current?.stop()
     setIsRecording(false)
-    stopPoseComparisonLoop()
+    stopPoseTrackingLoop()
     referenceVideoRef.current?.pause()
 
     // Shown immediately (pure client-side math); the VEED video generation kicked off right
     // after is much slower, so it's deliberately not awaited here — the text feedback below
-    // doesn't wait on it.
-    const summary = summarizeAngleDeltas(angleSamplesRef.current)
+    // doesn't wait on it. Compares this session's overall average angles against the
+    // reference's overall average (computed once when it loaded), not paired per-frame.
+    const userAverages = averageJointSamples(userAngleSamplesRef.current)
+    const summary = compareAverageAngles(userAverages, referenceAverageAnglesRef.current)
     setMediapipeFeedback(summary.feedback)
     setMediapipeCorrect(summary.overallCorrect)
 
@@ -349,7 +340,9 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
       }
 
       const blob = await videoResponse.blob()
-      setReferenceVideoUrl(URL.createObjectURL(blob))
+      const url = URL.createObjectURL(blob)
+      setReferenceVideoUrl(url)
+      void analyzeReferenceVideo(url)
     } catch {
       setReferenceVideoError('Could not reach the server')
     } finally {
@@ -362,7 +355,7 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     stream?.getTracks().forEach((track) => track.stop())
     if (recordedUrl) URL.revokeObjectURL(recordedUrl)
     if (referenceVideoUrl) URL.revokeObjectURL(referenceVideoUrl)
-    stopPoseComparisonLoop()
+    stopPoseTrackingLoop()
 
     setStream(null)
     setIsRecording(false)
@@ -374,8 +367,8 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     setCompareError(null)
     setReferenceVideoUrl(null)
     setReferenceVideoError(null)
-    setLiveAngleDeltas(null)
     setPoseError(null)
+    setIsAnalyzingReference(false)
     setMediapipeFeedback(null)
     setMediapipeCorrect(null)
     setMediapipeVeedUrl(null)
@@ -498,7 +491,7 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
                   <p>Generating your reference video — this takes a minute or two…</p>
                 </div>
               ) : referenceVideoUrl ? (
-                <div className="video-with-overlay">
+                <>
                   <video
                     ref={referenceVideoRef}
                     src={referenceVideoUrl}
@@ -509,8 +502,10 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
                     width={480}
                     height={360}
                   />
-                  <canvas ref={referenceCanvasRef} className="pose-overlay-canvas" width={480} height={360} />
-                </div>
+                  {isAnalyzingReference && (
+                    <p className="compare-status">Analyzing the reference video's form…</p>
+                  )}
+                </>
               ) : (
                 <div className="reference-video-placeholder">
                   <p role={referenceVideoError ? 'alert' : undefined}>
@@ -529,7 +524,11 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
 
               <div className="webcam-controls">
                 {!isRecording ? (
-                  <button type="button" onClick={startRecording} disabled={!stream}>
+                  <button
+                    type="button"
+                    onClick={startRecording}
+                    disabled={!stream || !poseModelsReady || isAnalyzingReference}
+                  >
                     Start recording
                   </button>
                 ) : (
@@ -542,27 +541,6 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
               {poseError && <p role="alert">{poseError}</p>}
             </div>
           </div>
-
-          {isRecording && (
-            <div className="live-pose-feedback">
-              <h3>Live joint comparison (MediaPipe)</h3>
-              {liveAngleDeltas ? (
-                <ul>
-                  {(Object.keys(liveAngleDeltas) as (keyof JointAngles)[]).map((joint) => {
-                    const d = liveAngleDeltas[joint]
-                    return (
-                      <li key={joint}>
-                        {JOINT_LABELS[joint]}: {d.user.toFixed(0)}° (you) vs {d.reference.toFixed(0)}° (reference) —{' '}
-                        <strong>{Math.abs(d.delta).toFixed(0)}° off</strong>
-                      </li>
-                    )
-                  })}
-                </ul>
-              ) : (
-                <p>Waiting for a clear view of both videos…</p>
-              )}
-            </div>
-          )}
 
           {mediapipeFeedback && (
             <div className={`mediapipe-feedback ${mediapipeCorrect ? 'is-correct' : 'is-incorrect'}`}>

@@ -103,10 +103,10 @@ export function computeJointAngles(landmarks: Point[]): JointAngles | null {
   }
 }
 
-/** Per-joint samples of |user angle - reference angle| collected across a whole recording. */
-export type AngleDeltaSamples = Record<keyof JointAngles, number[]>
+/** Per-joint angle samples collected over a video/session — raw angles, not deltas. */
+export type JointSamples = Record<keyof JointAngles, number[]>
 
-export function createEmptyDeltaSamples(): AngleDeltaSamples {
+export function createEmptyJointSamples(): JointSamples {
   return {
     leftElbow: [],
     rightElbow: [],
@@ -117,34 +117,112 @@ export function createEmptyDeltaSamples(): AngleDeltaSamples {
   }
 }
 
+/** Averages each joint's collected samples; a joint with no samples is omitted, not zeroed. */
+export function averageJointSamples(samples: JointSamples): Partial<Record<keyof JointAngles, number>> {
+  const averages: Partial<Record<keyof JointAngles, number>> = {}
+  for (const joint of Object.keys(JOINT_LABELS) as (keyof JointAngles)[]) {
+    const values = samples[joint]
+    if (values.length > 0) {
+      averages[joint] = values.reduce((sum, v) => sum + v, 0) / values.length
+    }
+  }
+  return averages
+}
+
+/**
+ * Loads a video off-DOM (not attached to the page), for one-off analysis — e.g. sampling the
+ * reference video's angles once, independent of whatever is visibly playing.
+ */
+export function loadDetachedVideo(src: string): Promise<HTMLVideoElement> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video')
+    video.muted = true
+    video.playsInline = true
+    video.preload = 'auto'
+    video.addEventListener('loadedmetadata', () => resolve(video), { once: true })
+    video.addEventListener('error', () => reject(new Error('Failed to load video for analysis')), {
+      once: true,
+    })
+    video.src = src
+  })
+}
+
+function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
+  return new Promise((resolve) => {
+    const onSeeked = () => {
+      video.removeEventListener('seeked', onSeeked)
+      resolve()
+    }
+    video.addEventListener('seeked', onSeeked)
+    video.currentTime = time
+  })
+}
+
+/**
+ * Samples a video at evenly-spaced points across its full duration and averages the joint
+ * angles found — a one-time, non-live analysis, so it doesn't need to happen in real time or
+ * in sync with anything else. The landmarker's timestamp argument just needs to keep
+ * increasing; it doesn't need to match the video's own currentTime.
+ */
+export async function analyzeVideoAverageAngles(
+  video: HTMLVideoElement,
+  landmarker: PoseLandmarker,
+  sampleCount = 15,
+): Promise<Partial<Record<keyof JointAngles, number>>> {
+  const samples = createEmptyJointSamples()
+
+  for (let i = 0; i < sampleCount; i++) {
+    const time = (video.duration * (i + 0.5)) / sampleCount
+    await seekTo(video, time)
+
+    const landmarks = landmarker.detectForVideo(video, performance.now()).landmarks[0]
+    const angles = landmarks ? computeJointAngles(landmarks) : null
+    if (angles) {
+      for (const joint of Object.keys(angles) as (keyof JointAngles)[]) {
+        samples[joint].push(angles[joint])
+      }
+    }
+  }
+
+  return averageJointSamples(samples)
+}
+
 const CORRECT_THRESHOLD_DEG = 25
 
 export interface AngleSummary {
-  averageDelta: Record<keyof JointAngles, number>
+  averageDelta: Partial<Record<keyof JointAngles, number>>
   overallCorrect: boolean
   feedback: string
 }
 
-/** Averages the per-frame deltas collected during a recording into a right/wrong verdict + text. */
-export function summarizeAngleDeltas(samples: AngleDeltaSamples): AngleSummary {
-  const averageDelta = {} as Record<keyof JointAngles, number>
+/** Compares your session's overall average joint angles against the reference's overall averages. */
+export function compareAverageAngles(
+  userAverages: Partial<Record<keyof JointAngles, number>>,
+  referenceAverages: Partial<Record<keyof JointAngles, number>>,
+): AngleSummary {
+  const averageDelta: Partial<Record<keyof JointAngles, number>> = {}
   const lines: string[] = []
   let offJointCount = 0
   let trackedJointCount = 0
 
   for (const joint of Object.keys(JOINT_LABELS) as (keyof JointAngles)[]) {
-    const values = samples[joint]
-    if (values.length === 0) continue
+    const userAvg = userAverages[joint]
+    const referenceAvg = referenceAverages[joint]
+    if (userAvg === undefined || referenceAvg === undefined) continue
 
     trackedJointCount += 1
-    const avg = values.reduce((sum, v) => sum + v, 0) / values.length
-    averageDelta[joint] = avg
+    const delta = Math.abs(userAvg - referenceAvg)
+    averageDelta[joint] = delta
 
-    if (avg > CORRECT_THRESHOLD_DEG) {
+    if (delta > CORRECT_THRESHOLD_DEG) {
       offJointCount += 1
-      lines.push(`${JOINT_LABELS[joint]} was off by ${avg.toFixed(0)}° on average — needs correction.`)
+      lines.push(
+        `${JOINT_LABELS[joint]} averaged ${userAvg.toFixed(0)}° for you vs ${referenceAvg.toFixed(0)}° for the reference — needs correction.`,
+      )
     } else {
-      lines.push(`${JOINT_LABELS[joint]} matched the reference closely (${avg.toFixed(0)}° average difference).`)
+      lines.push(
+        `${JOINT_LABELS[joint]} averaged ${userAvg.toFixed(0)}° for you, close to the reference's ${referenceAvg.toFixed(0)}°.`,
+      )
     }
   }
 
