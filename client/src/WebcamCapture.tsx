@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import type { PoseLandmarker } from '@mediapipe/tasks-vision'
+import { createPoseLandmarker, computeJointAngles, JOINT_LABELS } from './pose'
+import type { JointAngles } from './pose'
 
 const RECORDING_MIME_TYPE = MediaRecorder.isTypeSupported('video/mp4')
   ? 'video/mp4'
@@ -8,10 +11,23 @@ interface WebcamCaptureProps {
   token: string
 }
 
+interface JointDelta {
+  user: number
+  reference: number
+  delta: number
+}
+
 function WebcamCapture({ token }: WebcamCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const referenceVideoRef = useRef<HTMLVideoElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
+  // Each video feed needs its own PoseLandmarker instance: detectForVideo() requires
+  // strictly increasing timestamps per instance, and the webcam/reference feeds run on
+  // independent timelines.
+  const webcamLandmarkerRef = useRef<PoseLandmarker | null>(null)
+  const referenceLandmarkerRef = useRef<PoseLandmarker | null>(null)
+  const poseLoopRef = useRef<number | null>(null)
 
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -31,6 +47,9 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
   const [referenceVideoUrl, setReferenceVideoUrl] = useState<string | null>(null)
   const [referenceVideoError, setReferenceVideoError] = useState<string | null>(null)
   const [isLoadingReferenceVideo, setIsLoadingReferenceVideo] = useState(false)
+  const [poseModelsReady, setPoseModelsReady] = useState(false)
+  const [poseError, setPoseError] = useState<string | null>(null)
+  const [liveAngleDeltas, setLiveAngleDeltas] = useState<Record<keyof JointAngles, JointDelta> | null>(null)
 
   useEffect(() => {
     if (!submitted) return
@@ -69,10 +88,90 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
   }, [stream, isLoadingMedia])
 
   useEffect(() => {
+    if (!submitted) return
+
+    let active = true
+    Promise.all([createPoseLandmarker(), createPoseLandmarker()])
+      .then(([webcamLandmarker, referenceLandmarker]) => {
+        if (!active) {
+          webcamLandmarker.close()
+          referenceLandmarker.close()
+          return
+        }
+        webcamLandmarkerRef.current = webcamLandmarker
+        referenceLandmarkerRef.current = referenceLandmarker
+        setPoseModelsReady(true)
+      })
+      .catch((err: unknown) => {
+        setPoseError(err instanceof Error ? err.message : 'Could not load the pose model')
+      })
+
+    return () => {
+      active = false
+      if (poseLoopRef.current !== null) {
+        cancelAnimationFrame(poseLoopRef.current)
+        poseLoopRef.current = null
+      }
+      webcamLandmarkerRef.current?.close()
+      referenceLandmarkerRef.current?.close()
+      webcamLandmarkerRef.current = null
+      referenceLandmarkerRef.current = null
+      setPoseModelsReady(false)
+    }
+  }, [submitted])
+
+  useEffect(() => {
     return () => {
       if (recordedUrl) URL.revokeObjectURL(recordedUrl)
     }
   }, [recordedUrl])
+
+  const startPoseComparisonLoop = () => {
+    const step = () => {
+      const webcamLandmarker = webcamLandmarkerRef.current
+      const referenceLandmarker = referenceLandmarkerRef.current
+      const webcamVideo = videoRef.current
+      const referenceVideo = referenceVideoRef.current
+
+      if (
+        webcamLandmarker &&
+        referenceLandmarker &&
+        webcamVideo &&
+        referenceVideo &&
+        !referenceVideo.paused &&
+        referenceVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+      ) {
+        const now = performance.now()
+        const userLandmarks = webcamLandmarker.detectForVideo(webcamVideo, now).landmarks[0]
+        const referenceLandmarks = referenceLandmarker.detectForVideo(referenceVideo, now).landmarks[0]
+
+        const userAngles = userLandmarks ? computeJointAngles(userLandmarks) : null
+        const referenceAngles = referenceLandmarks ? computeJointAngles(referenceLandmarks) : null
+
+        if (userAngles && referenceAngles) {
+          const deltas = {} as Record<keyof JointAngles, JointDelta>
+          for (const joint of Object.keys(userAngles) as (keyof JointAngles)[]) {
+            deltas[joint] = {
+              user: userAngles[joint],
+              reference: referenceAngles[joint],
+              delta: userAngles[joint] - referenceAngles[joint],
+            }
+          }
+          setLiveAngleDeltas(deltas)
+        }
+      }
+
+      poseLoopRef.current = requestAnimationFrame(step)
+    }
+    poseLoopRef.current = requestAnimationFrame(step)
+  }
+
+  const stopPoseComparisonLoop = () => {
+    if (poseLoopRef.current !== null) {
+      cancelAnimationFrame(poseLoopRef.current)
+      poseLoopRef.current = null
+    }
+  }
 
   const startRecording = () => {
     if (!stream) return
@@ -87,6 +186,7 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     setUploadError(null)
     setCompareFeedback(null)
     setCompareError(null)
+    setLiveAngleDeltas(null)
 
     const recorder = new MediaRecorder(stream, { mimeType: RECORDING_MIME_TYPE })
     recorder.ondataavailable = (event) => {
@@ -101,11 +201,18 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     recorder.start()
     mediaRecorderRef.current = recorder
     setIsRecording(true)
+
+    if (poseModelsReady) {
+      void referenceVideoRef.current?.play().catch(() => {})
+      startPoseComparisonLoop()
+    }
   }
 
   const stopRecording = () => {
     mediaRecorderRef.current?.stop()
     setIsRecording(false)
+    stopPoseComparisonLoop()
+    referenceVideoRef.current?.pause()
   }
 
   const startSession = async () => {
@@ -145,6 +252,7 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     mediaRecorderRef.current?.stop()
     stream?.getTracks().forEach((track) => track.stop())
     if (recordedUrl) URL.revokeObjectURL(recordedUrl)
+    stopPoseComparisonLoop()
 
     setStream(null)
     setIsRecording(false)
@@ -156,6 +264,8 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     setCompareError(null)
     setReferenceVideoUrl(null)
     setReferenceVideoError(null)
+    setLiveAngleDeltas(null)
+    setPoseError(null)
     setSubmitted(false)
   }
 
@@ -274,7 +384,17 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
                   <p>Generating your reference video — this takes a minute or two…</p>
                 </div>
               ) : referenceVideoUrl ? (
-                <video src={referenceVideoUrl} controls width={480} height={360} />
+                <video
+                  ref={referenceVideoRef}
+                  src={referenceVideoUrl}
+                  controls
+                  loop
+                  muted
+                  playsInline
+                  crossOrigin="anonymous"
+                  width={480}
+                  height={360}
+                />
               ) : (
                 <div className="reference-video-placeholder">
                   <p role={referenceVideoError ? 'alert' : undefined}>
@@ -299,8 +419,31 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
                   </button>
                 )}
               </div>
+              {!poseModelsReady && !poseError && <p className="compare-status">Loading live pose model…</p>}
+              {poseError && <p role="alert">{poseError}</p>}
             </div>
           </div>
+
+          {isRecording && (
+            <div className="live-pose-feedback">
+              <h3>Live joint comparison (MediaPipe)</h3>
+              {liveAngleDeltas ? (
+                <ul>
+                  {(Object.keys(liveAngleDeltas) as (keyof JointAngles)[]).map((joint) => {
+                    const d = liveAngleDeltas[joint]
+                    return (
+                      <li key={joint}>
+                        {JOINT_LABELS[joint]}: {d.user.toFixed(0)}° (you) vs {d.reference.toFixed(0)}° (reference) —{' '}
+                        <strong>{Math.abs(d.delta).toFixed(0)}° off</strong>
+                      </li>
+                    )
+                  })}
+                </ul>
+              ) : (
+                <p>Waiting for a clear view of both videos…</p>
+              )}
+            </div>
+          )}
         </>
       )}
 
