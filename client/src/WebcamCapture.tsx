@@ -22,6 +22,9 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
   const [isUploading, setIsUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadedId, setUploadedId] = useState<string | null>(null)
+  const [isComparing, setIsComparing] = useState(false)
+  const [compareError, setCompareError] = useState<string | null>(null)
+  const [compareFeedback, setCompareFeedback] = useState<string | null>(null)
   const [description, setDescription] = useState('')
   const [submitted, setSubmitted] = useState(false)
   const [isLoadingMedia, setIsLoadingMedia] = useState(false)
@@ -82,6 +85,8 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     setRecordedBlob(null)
     setUploadedId(null)
     setUploadError(null)
+    setCompareFeedback(null)
+    setCompareError(null)
 
     const recorder = new MediaRecorder(stream, { mimeType: RECORDING_MIME_TYPE })
     recorder.ondataavailable = (event) => {
@@ -147,9 +152,40 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     setRecordedUrl(null)
     setUploadedId(null)
     setUploadError(null)
+    setCompareFeedback(null)
+    setCompareError(null)
     setReferenceVideoUrl(null)
     setReferenceVideoError(null)
     setSubmitted(false)
+  }
+
+  const runCompare = async () => {
+    setIsComparing(true)
+    setCompareError(null)
+    setCompareFeedback(null)
+
+    try {
+      const response = await fetch(
+        `http://localhost:3001/api/compare/${encodeURIComponent(description.trim())}`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      )
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        setCompareError(data.error ?? 'Could not compare your form')
+        return
+      }
+
+      setCompareFeedback(data.feedback)
+    } catch {
+      setCompareError('Could not reach the server')
+    } finally {
+      setIsComparing(false)
+    }
   }
 
   const saveToBucket = async () => {
@@ -157,6 +193,8 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
 
     setIsUploading(true)
     setUploadError(null)
+    setCompareFeedback(null)
+    setCompareError(null)
 
     try {
       const ext = RECORDING_MIME_TYPE === 'video/mp4' ? 'mp4' : 'webm'
@@ -177,6 +215,7 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
       }
 
       setUploadedId(data.id)
+      await runCompare()
     } catch {
       setUploadError('Could not reach the server')
     } finally {
@@ -272,11 +311,20 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
           <a href={recordedUrl} download={`recording.${RECORDING_MIME_TYPE === 'video/mp4' ? 'mp4' : 'webm'}`}>
             Download recording
           </a>
-          <button type="button" onClick={saveToBucket} disabled={isUploading}>
-            {isUploading ? 'Saving…' : 'Am I doing it right?'}
+          <button type="button" onClick={saveToBucket} disabled={isUploading || isComparing}>
+            {isUploading ? 'Saving…' : isComparing ? 'Comparing…' : 'Am I doing it right?'}
           </button>
           {uploadedId && <p>Saved (id: {uploadedId})</p>}
           {uploadError && <p role="alert">{uploadError}</p>}
+
+          {isComparing && <p className="compare-status">Comparing your form against the reference…</p>}
+          {compareFeedback && (
+            <div className="compare-feedback">
+              <h3>Feedback</h3>
+              <p>{compareFeedback}</p>
+            </div>
+          )}
+          {compareError && <p role="alert">{compareError}</p>}
         </div>
       )}
     </section>
