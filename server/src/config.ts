@@ -25,7 +25,7 @@ const loaded = loadSecrets();
 
 export const config: Secrets = {
   port: loaded.port ?? 3001,
-  jwtSecret: loaded.jwtSecret ?? "dev-secret-change-me",
+  jwtSecret: loaded.jwtSecret || "dev-secret-change-me",
   googleClientId: loaded.googleClientId ?? "",
   gcsBucketName: loaded.gcsBucketName ?? "",
   googleApplicationCredentials: loaded.googleApplicationCredentials ?? "",
