@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { load } from "js-yaml";
 
 interface Secrets {
@@ -9,9 +10,14 @@ interface Secrets {
   googleApplicationCredentials: string;
   demoUsername: string;
   demoPassword: string;
+  falKey: string;
 }
 
-const SECRETS_FILE = process.env.SECRETS_FILE ?? new URL("../secrets.yaml", import.meta.url).pathname;
+// fileURLToPath, not URL.pathname: on Windows the latter yields "/C:/..." and
+// percent-encodes non-ASCII path segments, so the file is never found.
+const SECRETS_FILE =
+  process.env.SECRETS_FILE ??
+  fileURLToPath(new URL("../secrets.yaml", import.meta.url));
 
 function loadSecrets(): Partial<Secrets> {
   if (!existsSync(SECRETS_FILE)) {
@@ -31,4 +37,5 @@ export const config: Secrets = {
   googleApplicationCredentials: loaded.googleApplicationCredentials ?? "",
   demoUsername: loaded.demoUsername ?? "demo",
   demoPassword: loaded.demoPassword ?? "password123",
+  falKey: loaded.falKey ?? "",
 };

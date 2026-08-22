@@ -62,38 +62,6 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
   }, [submitted])
 
   useEffect(() => {
-    if (!submitted) return
-
-    let active = true
-    setIsLoadingReferenceVideo(true)
-    setReferenceVideoError(null)
-
-    fetch('http://localhost:3001/api/videos/reference', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(async (response) => {
-        const data = await response.json()
-        if (!active) return
-
-        if (!response.ok) {
-          setReferenceVideoError(data.error ?? 'Could not load reference video')
-          return
-        }
-        setReferenceVideoUrl(data.url)
-      })
-      .catch(() => {
-        if (active) setReferenceVideoError('Could not reach the server')
-      })
-      .finally(() => {
-        if (active) setIsLoadingReferenceVideo(false)
-      })
-
-    return () => {
-      active = false
-    }
-  }, [submitted, token])
-
-  useEffect(() => {
     return () => {
       if (recordedUrl) URL.revokeObjectURL(recordedUrl)
     }
@@ -129,6 +97,39 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
   const stopRecording = () => {
     mediaRecorderRef.current?.stop()
     setIsRecording(false)
+  }
+
+  const startSession = async () => {
+    if (!description.trim()) return
+
+    setSubmitted(true)
+    setReferenceVideoError(null)
+    setReferenceVideoUrl(null)
+    setIsLoadingReferenceVideo(true)
+
+    try {
+      const response = await fetch('http://localhost:3001/api/exercises/generate', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ exercise: description.trim() }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        setReferenceVideoError(data.error ?? 'Could not generate the reference video')
+        return
+      }
+
+      setReferenceVideoUrl(data.url)
+    } catch {
+      setReferenceVideoError('Could not reach the server')
+    } finally {
+      setIsLoadingReferenceVideo(false)
+    }
   }
 
   const resetToDescription = () => {
@@ -203,7 +204,11 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
             disabled={submitted}
           />
           {!submitted ? (
-            <button type="button" onClick={() => setSubmitted(true)}>
+            <button
+              type="button"
+              onClick={startSession}
+              disabled={!description.trim()}
+            >
               Let's do it!
             </button>
           ) : (
@@ -223,13 +228,15 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
               <h2>Reference video</h2>
               {isLoadingReferenceVideo ? (
                 <div className="reference-video-placeholder">
-                  <p>Loading…</p>
+                  <p>Generating your reference video — this takes a minute or two…</p>
                 </div>
               ) : referenceVideoUrl ? (
                 <video src={referenceVideoUrl} controls width={480} height={360} />
               ) : (
                 <div className="reference-video-placeholder">
-                  <p>{referenceVideoError ?? 'No reference video yet'}</p>
+                  <p role={referenceVideoError ? 'alert' : undefined}>
+                    {referenceVideoError ?? 'No reference video yet'}
+                  </p>
                 </div>
               )}
             </div>
