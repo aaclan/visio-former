@@ -1,4 +1,5 @@
-import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision'
+import { DrawingUtils, FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision'
+import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 
 const WASM_BASE_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm'
 const MODEL_ASSET_PATH =
@@ -67,6 +68,24 @@ export const JOINT_LABELS: Record<keyof JointAngles, string> = {
   rightHip: 'Right hip',
 }
 
+/** Draws the pose skeleton (connectors + landmark dots) onto a canvas, clearing it first. */
+export function drawPoseSkeleton(
+  ctx: CanvasRenderingContext2D,
+  landmarks: NormalizedLandmark[],
+  width: number,
+  height: number,
+): void {
+  ctx.save()
+  ctx.clearRect(0, 0, width, height)
+  const drawingUtils = new DrawingUtils(ctx)
+  drawingUtils.drawConnectors(landmarks, PoseLandmarker.POSE_CONNECTIONS, {
+    color: '#8AD7FF',
+    lineWidth: 3,
+  })
+  drawingUtils.drawLandmarks(landmarks, { color: '#EBA846', radius: 4 })
+  ctx.restore()
+}
+
 /** Computes key joint angles from one pose's 33 landmarks, or null if any needed point is missing. */
 export function computeJointAngles(landmarks: Point[]): JointAngles | null {
   const required = Object.values(LANDMARK)
@@ -82,4 +101,60 @@ export function computeJointAngles(landmarks: Point[]): JointAngles | null {
     leftHip: angleAt(get(LANDMARK.leftHip), get(LANDMARK.leftShoulder), get(LANDMARK.leftKnee)),
     rightHip: angleAt(get(LANDMARK.rightHip), get(LANDMARK.rightShoulder), get(LANDMARK.rightKnee)),
   }
+}
+
+/** Per-joint samples of |user angle - reference angle| collected across a whole recording. */
+export type AngleDeltaSamples = Record<keyof JointAngles, number[]>
+
+export function createEmptyDeltaSamples(): AngleDeltaSamples {
+  return {
+    leftElbow: [],
+    rightElbow: [],
+    leftKnee: [],
+    rightKnee: [],
+    leftHip: [],
+    rightHip: [],
+  }
+}
+
+const CORRECT_THRESHOLD_DEG = 25
+
+export interface AngleSummary {
+  averageDelta: Record<keyof JointAngles, number>
+  overallCorrect: boolean
+  feedback: string
+}
+
+/** Averages the per-frame deltas collected during a recording into a right/wrong verdict + text. */
+export function summarizeAngleDeltas(samples: AngleDeltaSamples): AngleSummary {
+  const averageDelta = {} as Record<keyof JointAngles, number>
+  const lines: string[] = []
+  let offJointCount = 0
+  let trackedJointCount = 0
+
+  for (const joint of Object.keys(JOINT_LABELS) as (keyof JointAngles)[]) {
+    const values = samples[joint]
+    if (values.length === 0) continue
+
+    trackedJointCount += 1
+    const avg = values.reduce((sum, v) => sum + v, 0) / values.length
+    averageDelta[joint] = avg
+
+    if (avg > CORRECT_THRESHOLD_DEG) {
+      offJointCount += 1
+      lines.push(`${JOINT_LABELS[joint]} was off by ${avg.toFixed(0)}° on average — needs correction.`)
+    } else {
+      lines.push(`${JOINT_LABELS[joint]} matched the reference closely (${avg.toFixed(0)}° average difference).`)
+    }
+  }
+
+  const overallCorrect = trackedJointCount > 0 && offJointCount === 0
+  const headline =
+    trackedJointCount === 0
+      ? "Couldn't get a clear enough view of both videos to compare joints."
+      : overallCorrect
+        ? 'Overall: your form matched the reference well.'
+        : 'Overall: your form needs some adjustments.'
+
+  return { averageDelta, overallCorrect, feedback: [headline, ...lines].join('\n') }
 }

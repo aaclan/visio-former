@@ -116,3 +116,35 @@ export async function generateFormCategories(exercise: string): Promise<string[]
 
   return parsed.categories as string[];
 }
+
+const SPOKEN_FEEDBACK_SYSTEM_PROMPT = `You are a warm, encouraging physiotherapist speaking directly to a
+client right after watching them attempt an exercise. You'll be given data-driven notes (joint angle deltas,
+percentages, category labels). Rewrite them as a short spoken script (2-4 sentences) you'd actually say out
+loud to the client's face — natural, conversational, human. Keep the substance (what was good, what to fix),
+but drop robotic phrasing like "on average", "% of frames", or long lists of raw numbers. Where a specific
+correction matters, describe it the way a coach would cue a movement (e.g. "straighten your arm a bit more at
+the top" instead of "elbow off by 22 degrees"), not the way a sensor would report it. End on an encouraging
+note. Output only the spoken script, nothing else.`;
+
+/** Rewrites data-driven comparison feedback into a short natural-sounding spoken script for VEED. */
+export async function generateSpokenFeedback(feedback: string): Promise<string> {
+  if (!config.openaiApiKey) {
+    throw new Error("openaiApiKey is not configured in secrets.yaml");
+  }
+  openai ??= new OpenAI({ apiKey: config.openaiApiKey });
+
+  const completion = await openai.chat.completions.create({
+    model: config.openaiVisionModel,
+    messages: [
+      { role: "system", content: SPOKEN_FEEDBACK_SYSTEM_PROMPT },
+      { role: "user", content: feedback },
+    ],
+    max_tokens: 300,
+  });
+
+  const spoken = completion.choices[0]?.message?.content?.trim();
+  if (!spoken) {
+    throw new Error("OpenAI did not return spoken feedback");
+  }
+  return spoken;
+}

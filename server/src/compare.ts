@@ -5,7 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { requireAuth } from "./auth.js";
 import { getBucket } from "./storage.js";
 import { captureFrames } from "./video.js";
-import { describeFrames, generateFormCategories } from "./vision.js";
+import { describeFrames, generateFormCategories, generateSpokenFeedback } from "./vision.js";
 import { DEFAULT_FORM_CLASSIFICATIONS, classifyDescriptions, compareClassifications } from "./pioneer.js";
 import { generateVeedVideo } from "./veed.js";
 
@@ -46,6 +46,34 @@ async function storeReferenceFrame(framePath: string, objectId: string): Promise
     expires: Date.now() + 15 * 60 * 1000,
   });
   return url;
+}
+
+/** Uploads a `data:image/...;base64,...` string (e.g. a client-side canvas snapshot) to GCS. */
+async function storeImageDataUrl(dataUrl: string, objectId: string): Promise<string> {
+  const match = /^data:(image\/\w+);base64,(.+)$/.exec(dataUrl);
+  if (!match) {
+    throw new Error("imageDataUrl must be a base64 image data URL");
+  }
+  const [, contentType, base64] = match;
+
+  const gcsFile = getBucket().file(`${REFERENCE_FRAME_PREFIX}${objectId}.jpg`);
+  await gcsFile.save(Buffer.from(base64, "base64"), { contentType, resumable: false });
+
+  const [url] = await gcsFile.getSignedUrl({
+    action: "read",
+    expires: Date.now() + 15 * 60 * 1000,
+  });
+  return url;
+}
+
+/** Rewrites data-driven feedback into a natural spoken script; falls back to the raw text if that fails. */
+async function toSpokenFeedback(feedback: string, log: FastifyInstance["log"]): Promise<string> {
+  try {
+    return await generateSpokenFeedback(feedback);
+  } catch (err) {
+    log.warn(err, "failed to generate spoken feedback, sending raw feedback to VEED instead");
+    return feedback;
+  }
 }
 
 export async function registerCompareRoutes(app: FastifyInstance) {
@@ -158,7 +186,8 @@ export async function registerCompareRoutes(app: FastifyInstance) {
         try {
           const objectId = `${username}-${exerciseSlug}`;
           referenceImageUrl = await storeReferenceFrame(referenceResult.frames[0].path, objectId);
-          const veed = await generateVeedVideo(referenceImageUrl, feedback, `${objectId}-advice.mp4`);
+          const spokenFeedback = await toSpokenFeedback(feedback, request.log);
+          const veed = await generateVeedVideo(referenceImageUrl, spokenFeedback, `${objectId}-advice.mp4`);
           veedVideoUrl = veed.url;
         } catch (err) {
           request.log.warn(err, "failed to generate VEED advice video");
@@ -182,6 +211,38 @@ export async function registerCompareRoutes(app: FastifyInstance) {
         return reply.code(502).send({ error: message });
       } finally {
         await rm(tmpDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  // Feeds a client-computed (MediaPipe) feedback string + a canvas-snapshot reference image
+  // into VEED, for when the comparison itself already happened live in the browser and the
+  // server's only job is generating the advice video from that result.
+  app.post<{ Params: { exercise: string }; Body: { feedback?: string; imageDataUrl?: string } }>(
+    "/api/mediapipe-veed/:exercise",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const exerciseSlug = slugify(request.params.exercise);
+      if (!exerciseSlug) {
+        return reply.code(400).send({ error: "exercise must contain letters or numbers" });
+      }
+      const { feedback, imageDataUrl } = request.body ?? {};
+      if (!feedback?.trim() || !imageDataUrl?.trim()) {
+        return reply.code(400).send({ error: "feedback and imageDataUrl are required" });
+      }
+
+      const username = slugify(request.username ?? "user") || "user";
+      const objectId = `${username}-${exerciseSlug}-mediapipe`;
+
+      try {
+        const imageUrl = await storeImageDataUrl(imageDataUrl, objectId);
+        const spokenFeedback = await toSpokenFeedback(feedback, request.log);
+        const veed = await generateVeedVideo(imageUrl, spokenFeedback, `${objectId}-advice.mp4`);
+        return { veedVideoUrl: veed.url };
+      } catch (err) {
+        request.log.error(err, "failed to generate VEED advice video from MediaPipe feedback");
+        const message = err instanceof Error ? err.message : "failed to generate advice video";
+        return reply.code(502).send({ error: message });
       }
     },
   );

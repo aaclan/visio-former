@@ -1,11 +1,29 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PoseLandmarker } from '@mediapipe/tasks-vision'
-import { createPoseLandmarker, computeJointAngles, JOINT_LABELS } from './pose'
-import type { JointAngles } from './pose'
+import {
+  createPoseLandmarker,
+  computeJointAngles,
+  drawPoseSkeleton,
+  createEmptyDeltaSamples,
+  summarizeAngleDeltas,
+  JOINT_LABELS,
+} from './pose'
+import type { JointAngles, AngleDeltaSamples } from './pose'
 
 const RECORDING_MIME_TYPE = MediaRecorder.isTypeSupported('video/mp4')
   ? 'video/mp4'
   : 'video/webm'
+
+function captureVideoFrameDataUrl(video: HTMLVideoElement): string | null {
+  if (video.videoWidth === 0 || video.videoHeight === 0) return null
+  const canvas = document.createElement('canvas')
+  canvas.width = video.videoWidth
+  canvas.height = video.videoHeight
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/jpeg', 0.85)
+}
 
 interface WebcamCaptureProps {
   token: string
@@ -20,6 +38,8 @@ interface JointDelta {
 function WebcamCapture({ token }: WebcamCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const referenceVideoRef = useRef<HTMLVideoElement>(null)
+  const webcamCanvasRef = useRef<HTMLCanvasElement>(null)
+  const referenceCanvasRef = useRef<HTMLCanvasElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   // Each video feed needs its own PoseLandmarker instance: detectForVideo() requires
@@ -28,6 +48,7 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
   const webcamLandmarkerRef = useRef<PoseLandmarker | null>(null)
   const referenceLandmarkerRef = useRef<PoseLandmarker | null>(null)
   const poseLoopRef = useRef<number | null>(null)
+  const angleSamplesRef = useRef<AngleDeltaSamples>(createEmptyDeltaSamples())
 
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -50,6 +71,11 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
   const [poseModelsReady, setPoseModelsReady] = useState(false)
   const [poseError, setPoseError] = useState<string | null>(null)
   const [liveAngleDeltas, setLiveAngleDeltas] = useState<Record<keyof JointAngles, JointDelta> | null>(null)
+  const [mediapipeFeedback, setMediapipeFeedback] = useState<string | null>(null)
+  const [mediapipeCorrect, setMediapipeCorrect] = useState<boolean | null>(null)
+  const [isMediapipeVeedGenerating, setIsMediapipeVeedGenerating] = useState(false)
+  const [mediapipeVeedUrl, setMediapipeVeedUrl] = useState<string | null>(null)
+  const [mediapipeVeedError, setMediapipeVeedError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!submitted) return
@@ -151,17 +177,26 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
         const userLandmarks = webcamLandmarker.detectForVideo(webcamVideo, now).landmarks[0]
         const referenceLandmarks = referenceLandmarker.detectForVideo(referenceVideo, now).landmarks[0]
 
+        const webcamCanvas = webcamCanvasRef.current
+        if (webcamCanvas && userLandmarks) {
+          const ctx = webcamCanvas.getContext('2d')
+          if (ctx) drawPoseSkeleton(ctx, userLandmarks, webcamCanvas.width, webcamCanvas.height)
+        }
+        const referenceCanvas = referenceCanvasRef.current
+        if (referenceCanvas && referenceLandmarks) {
+          const ctx = referenceCanvas.getContext('2d')
+          if (ctx) drawPoseSkeleton(ctx, referenceLandmarks, referenceCanvas.width, referenceCanvas.height)
+        }
+
         const userAngles = userLandmarks ? computeJointAngles(userLandmarks) : null
         const referenceAngles = referenceLandmarks ? computeJointAngles(referenceLandmarks) : null
 
         if (userAngles && referenceAngles) {
           const deltas = {} as Record<keyof JointAngles, JointDelta>
           for (const joint of Object.keys(userAngles) as (keyof JointAngles)[]) {
-            deltas[joint] = {
-              user: userAngles[joint],
-              reference: referenceAngles[joint],
-              delta: userAngles[joint] - referenceAngles[joint],
-            }
+            const delta = userAngles[joint] - referenceAngles[joint]
+            deltas[joint] = { user: userAngles[joint], reference: referenceAngles[joint], delta }
+            angleSamplesRef.current[joint].push(Math.abs(delta))
           }
           setLiveAngleDeltas(deltas)
         }
@@ -193,6 +228,11 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     setCompareFeedback(null)
     setCompareError(null)
     setLiveAngleDeltas(null)
+    setMediapipeFeedback(null)
+    setMediapipeCorrect(null)
+    setMediapipeVeedUrl(null)
+    setMediapipeVeedError(null)
+    angleSamplesRef.current = createEmptyDeltaSamples()
 
     const recorder = new MediaRecorder(stream, { mimeType: RECORDING_MIME_TYPE })
     recorder.ondataavailable = (event) => {
@@ -214,11 +254,61 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     }
   }
 
+  const generateMediapipeVeed = async (feedback: string) => {
+    const imageDataUrl = referenceVideoRef.current
+      ? captureVideoFrameDataUrl(referenceVideoRef.current)
+      : null
+
+    if (!imageDataUrl) {
+      setMediapipeVeedError('Could not capture a reference image')
+      return
+    }
+
+    setIsMediapipeVeedGenerating(true)
+    setMediapipeVeedError(null)
+
+    try {
+      const response = await fetch(
+        `http://localhost:3001/api/mediapipe-veed/${encodeURIComponent(description.trim())}`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ feedback, imageDataUrl }),
+        },
+      )
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        setMediapipeVeedError(data.error ?? 'Could not generate the advice video')
+        return
+      }
+
+      setMediapipeVeedUrl(data.veedVideoUrl)
+    } catch {
+      setMediapipeVeedError('Could not reach the server')
+    } finally {
+      setIsMediapipeVeedGenerating(false)
+    }
+  }
+
   const stopRecording = () => {
     mediaRecorderRef.current?.stop()
     setIsRecording(false)
     stopPoseComparisonLoop()
     referenceVideoRef.current?.pause()
+
+    // Shown immediately (pure client-side math); the VEED video generation kicked off right
+    // after is much slower, so it's deliberately not awaited here — the text feedback below
+    // doesn't wait on it.
+    const summary = summarizeAngleDeltas(angleSamplesRef.current)
+    setMediapipeFeedback(summary.feedback)
+    setMediapipeCorrect(summary.overallCorrect)
+
+    void generateMediapipeVeed(summary.feedback)
   }
 
   const startSession = async () => {
@@ -286,6 +376,10 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     setReferenceVideoError(null)
     setLiveAngleDeltas(null)
     setPoseError(null)
+    setMediapipeFeedback(null)
+    setMediapipeCorrect(null)
+    setMediapipeVeedUrl(null)
+    setMediapipeVeedError(null)
     setSubmitted(false)
   }
 
@@ -404,16 +498,19 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
                   <p>Generating your reference video — this takes a minute or two…</p>
                 </div>
               ) : referenceVideoUrl ? (
-                <video
-                  ref={referenceVideoRef}
-                  src={referenceVideoUrl}
-                  controls
-                  loop
-                  muted
-                  playsInline
-                  width={480}
-                  height={360}
-                />
+                <div className="video-with-overlay">
+                  <video
+                    ref={referenceVideoRef}
+                    src={referenceVideoUrl}
+                    controls
+                    loop
+                    muted
+                    playsInline
+                    width={480}
+                    height={360}
+                  />
+                  <canvas ref={referenceCanvasRef} className="pose-overlay-canvas" width={480} height={360} />
+                </div>
               ) : (
                 <div className="reference-video-placeholder">
                   <p role={referenceVideoError ? 'alert' : undefined}>
@@ -425,7 +522,10 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
 
             <div className="capture-column">
               <h2>Webcam</h2>
-              <video ref={videoRef} autoPlay muted playsInline width={480} height={360} />
+              <div className="video-with-overlay">
+                <video ref={videoRef} autoPlay muted playsInline width={480} height={360} />
+                <canvas ref={webcamCanvasRef} className="pose-overlay-canvas" width={480} height={360} />
+              </div>
 
               <div className="webcam-controls">
                 {!isRecording ? (
@@ -461,6 +561,21 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
               ) : (
                 <p>Waiting for a clear view of both videos…</p>
               )}
+            </div>
+          )}
+
+          {mediapipeFeedback && (
+            <div className={`mediapipe-feedback ${mediapipeCorrect ? 'is-correct' : 'is-incorrect'}`}>
+              <h3>{mediapipeCorrect ? '✓ Looking good!' : '✗ Needs adjustment'}</h3>
+              <p>{mediapipeFeedback}</p>
+
+              {isMediapipeVeedGenerating && (
+                <p className="compare-status">Generating your advice video with VEED…</p>
+              )}
+              {mediapipeVeedUrl && (
+                <video src={mediapipeVeedUrl} controls width={480} height={360} />
+              )}
+              {mediapipeVeedError && <p role="alert">{mediapipeVeedError}</p>}
             </div>
           )}
         </>
