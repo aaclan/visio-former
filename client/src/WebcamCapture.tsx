@@ -25,6 +25,9 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
   const [description, setDescription] = useState('')
   const [submitted, setSubmitted] = useState(false)
   const [isLoadingMedia, setIsLoadingMedia] = useState(false)
+  const [referenceVideoUrl, setReferenceVideoUrl] = useState<string | null>(null)
+  const [referenceVideoError, setReferenceVideoError] = useState<string | null>(null)
+  const [isLoadingReferenceVideo, setIsLoadingReferenceVideo] = useState(false)
 
   useEffect(() => {
     if (!submitted) return
@@ -57,6 +60,38 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submitted])
+
+  useEffect(() => {
+    if (!submitted) return
+
+    let active = true
+    setIsLoadingReferenceVideo(true)
+    setReferenceVideoError(null)
+
+    fetch('http://localhost:3001/api/videos/reference', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (response) => {
+        const data = await response.json()
+        if (!active) return
+
+        if (!response.ok) {
+          setReferenceVideoError(data.error ?? 'Could not load reference video')
+          return
+        }
+        setReferenceVideoUrl(data.url)
+      })
+      .catch(() => {
+        if (active) setReferenceVideoError('Could not reach the server')
+      })
+      .finally(() => {
+        if (active) setIsLoadingReferenceVideo(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [submitted, token])
 
   useEffect(() => {
     return () => {
@@ -107,6 +142,8 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     setRecordedUrl(null)
     setUploadedId(null)
     setUploadError(null)
+    setReferenceVideoUrl(null)
+    setReferenceVideoError(null)
     setSubmitted(false)
   }
 
@@ -184,9 +221,17 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
           <div className="capture-layout">
             <div className="reference-column">
               <h2>Reference video</h2>
-              <div className="reference-video-placeholder">
-                <p>No reference video yet</p>
-              </div>
+              {isLoadingReferenceVideo ? (
+                <div className="reference-video-placeholder">
+                  <p>Loading…</p>
+                </div>
+              ) : referenceVideoUrl ? (
+                <video src={referenceVideoUrl} controls width={480} height={360} />
+              ) : (
+                <div className="reference-video-placeholder">
+                  <p>{referenceVideoError ?? 'No reference video yet'}</p>
+                </div>
+              )}
             </div>
 
             <div className="capture-column">
