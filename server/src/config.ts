@@ -35,14 +35,15 @@ function loadSecrets(): Partial<Secrets> {
 const loaded = loadSecrets();
 
 export const config: Secrets = {
-  port: loaded.port ?? 3001,
-  jwtSecret: loaded.jwtSecret || "dev-secret-change-me",
-  googleClientId: loaded.googleClientId ?? "",
-  gcsBucketName: loaded.gcsBucketName ?? "",
-  googleApplicationCredentials: loaded.googleApplicationCredentials ?? "",
-  demoUsername: loaded.demoUsername ?? "demo",
-  demoPassword: loaded.demoPassword ?? "password123",
-  falKey: loaded.falKey ?? "",
+  port: loaded.port ?? (Number(process.env.PORT) || 3001),
+  jwtSecret: loaded.jwtSecret || process.env.JWT_SECRET || "dev-secret-change-me",
+  googleClientId: loaded.googleClientId ?? process.env.GOOGLE_CLIENT_ID ?? "",
+  gcsBucketName: loaded.gcsBucketName ?? process.env.GCP_BUCKET_NAME ?? "",
+  googleApplicationCredentials:
+    loaded.googleApplicationCredentials ?? process.env.GOOGLE_APPLICATION_CREDENTIALS ?? "",
+  demoUsername: loaded.demoUsername ?? process.env.DEMO_USERNAME ?? "demo",
+  demoPassword: loaded.demoPassword ?? process.env.DEMO_PASSWORD ?? "password123",
+  falKey: loaded.falKey ?? process.env.FAL_KEY ?? "",
   openaiApiKey: loaded.openaiApiKey ?? "",
   openaiVisionModel: loaded.openaiVisionModel ?? "gpt-4o",
   pioneerApiKey: loaded.pioneerApiKey ?? "",

@@ -8,6 +8,7 @@ interface LoginProps {
 }
 
 function Login({ onLoginSuccess }: LoginProps) {
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? ''
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -100,14 +101,18 @@ function Login({ onLoginSuccess }: LoginProps) {
 
       <div className="login-divider">or</div>
 
-      <GoogleLogin
-        onSuccess={(response) => {
-          if (response.credential) {
-            void handleGoogleSuccess(response.credential)
-          }
-        }}
-        onError={() => setError('Google login failed')}
-      />
+      {googleClientId ? (
+        <GoogleLogin
+          onSuccess={(response) => {
+            if (response.credential) {
+              void handleGoogleSuccess(response.credential)
+            }
+          }}
+          onError={() => setError('Google login failed')}
+        />
+      ) : (
+        <p role="status">Google login is not configured. Use the demo login.</p>
+      )}
     </section>
   )
 }
