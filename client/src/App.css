@@ -26,6 +26,76 @@
   gap: 8px;
 }
 
+.exercise-description {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  max-width: 984px;
+}
+
+.exercise-description-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.exercise-description textarea {
+  flex: 1;
+  font-size: 16px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.exercise-description-row button {
+  font-size: 16px;
+  padding: 8px 16px;
+  border-radius: 5px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.capture-layout {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 24px;
+  width: 100%;
+}
+
+.capture-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.reference-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.reference-video-placeholder {
+  width: 480px;
+  height: 360px;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f0f0f0;
+  border: 2px dashed #ccc;
+  border-radius: 8px;
+  color: #888;
+}
+
 #login {
   display: flex;
   flex-direction: column;
