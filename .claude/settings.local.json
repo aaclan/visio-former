@@ -6,7 +6,24 @@
       "Bash(npm install *)",
       "Bash(gh --version)",
       "Bash(npx tsc *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(npm uninstall *)",
+      "Bash(node dist/index.js)",
+      "Bash(curl -s http://localhost:3001/api/health)",
+      "Bash(kill %1)",
+      "Bash(wait)",
+      "Bash(lsof *)",
+      "Bash(gcloud --version)",
+      "Bash(gcloud config get-value project *)",
+      "Bash(gcloud projects list *)",
+      "Bash(gcloud auth login *)",
+      "Bash(gcloud config set project *)",
+      "Bash(gcloud auth application-default set-quota-project *)",
+      "Bash(gcloud storage buckets describe *)",
+      "Bash(gcloud iam service-accounts create *)",
+      "Bash(gcloud storage buckets add-iam-policy-binding *)",
+      "Bash(mkdir -p ~/secrets)",
+      "Bash(gcloud iam *)"
     ]
   }
 }

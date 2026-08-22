@@ -2,5 +2,11 @@ node_modules
 dist
 scripts/.out
 .env
+secrets.yaml
 *.log
 .DS_Store
+
+# Google Cloud service account key files, in case one is ever copied into the repo
+*-gcs.json
+*service-account*.json
+*credentials*.json
