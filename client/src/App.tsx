@@ -1,11 +1,7 @@
 import { useState } from 'react'
 import Login from './Login'
-<<<<<<< HEAD
 import WebcamCapture from './WebcamCapture'
 import Logo from './Logo'
-=======
-import FormCheck from './FormCheck'
->>>>>>> parent of 1620135 (Revert "Add form-check comparison pipeline (Vision captioning + Pioneer classification)")
 import './App.css'
 
 const TOKEN_STORAGE_KEY = 'auth_token'
