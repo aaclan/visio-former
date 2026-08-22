@@ -99,4 +99,29 @@ export async function registerExerciseRoutes(app: FastifyInstance) {
       });
     },
   );
+
+  // Streams the video through our own origin (which already has CORS enabled for the
+  // client) instead of a GCS signed URL, so client-side code (e.g. MediaPipe reading pixel
+  // data from a <video> element) doesn't hit GCS's own CORS policy, which isn't configured.
+  app.get<{ Params: { exercise: string } }>(
+    "/api/exercises/:exercise/video",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const exerciseSlug = slugify(request.params.exercise);
+      if (!exerciseSlug) {
+        return reply.code(400).send({ error: "exercise must contain letters or numbers" });
+      }
+      const username = slugify(request.username ?? "user") || "user";
+      const objectName = `${OBJECT_PREFIX}${username}-${exerciseSlug}.mp4`;
+
+      const gcsFile = getBucket().file(objectName);
+      const [exists] = await gcsFile.exists();
+      if (!exists) {
+        return reply.code(404).send({ error: "reference video not found" });
+      }
+
+      reply.type("video/mp4");
+      return gcsFile.createReadStream();
+    },
+  );
 }

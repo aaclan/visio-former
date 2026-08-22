@@ -126,6 +126,12 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     }
   }, [recordedUrl])
 
+  useEffect(() => {
+    return () => {
+      if (referenceVideoUrl) URL.revokeObjectURL(referenceVideoUrl)
+    }
+  }, [referenceVideoUrl])
+
   const startPoseComparisonLoop = () => {
     const step = () => {
       const webcamLandmarker = webcamLandmarkerRef.current
@@ -224,7 +230,7 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     setIsLoadingReferenceVideo(true)
 
     try {
-      const response = await fetch('http://localhost:3001/api/exercises/generate', {
+      const generateResponse = await fetch('http://localhost:3001/api/exercises/generate', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -233,14 +239,27 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
         body: JSON.stringify({ exercise: description.trim() }),
       })
 
-      const data = await response.json()
-
-      if (!response.ok) {
+      if (!generateResponse.ok) {
+        const data = await generateResponse.json()
         setReferenceVideoError(data.error ?? 'Could not generate the reference video')
         return
       }
 
-      setReferenceVideoUrl(data.url)
+      // Fetched as an authenticated blob (not the GCS signed URL directly) so the resulting
+      // blob: URL isn't cross-origin — MediaPipe can then read its pixel data freely, which
+      // it couldn't from the GCS URL since that bucket has no CORS policy configured.
+      const videoResponse = await fetch(
+        `http://localhost:3001/api/exercises/${encodeURIComponent(description.trim())}/video`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      )
+
+      if (!videoResponse.ok) {
+        setReferenceVideoError('Could not load the reference video')
+        return
+      }
+
+      const blob = await videoResponse.blob()
+      setReferenceVideoUrl(URL.createObjectURL(blob))
     } catch {
       setReferenceVideoError('Could not reach the server')
     } finally {
@@ -252,6 +271,7 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     mediaRecorderRef.current?.stop()
     stream?.getTracks().forEach((track) => track.stop())
     if (recordedUrl) URL.revokeObjectURL(recordedUrl)
+    if (referenceVideoUrl) URL.revokeObjectURL(referenceVideoUrl)
     stopPoseComparisonLoop()
 
     setStream(null)
@@ -391,7 +411,6 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
                   loop
                   muted
                   playsInline
-                  crossOrigin="anonymous"
                   width={480}
                   height={360}
                 />
