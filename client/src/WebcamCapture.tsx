@@ -9,6 +9,7 @@ import {
   compareSessions,
   loadDetachedVideo,
   analyzeVideoAverageAngles,
+  seekTo,
 } from './pose'
 import type { JointAngles, JointSamples, SessionStats } from './pose'
 
@@ -249,9 +250,11 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
   }
 
   const generateMediapipeVeed = async (feedback: string) => {
-    const imageDataUrl = referenceVideoRef.current
-      ? captureVideoFrameDataUrl(referenceVideoRef.current)
-      : null
+    // Seek to the reference video's neutral starting pose (not wherever it happened to be
+    // paused mid-loop) so VEED's avatar starts from a presentable, consistent frame.
+    const referenceVideo = referenceVideoRef.current
+    if (referenceVideo) await seekTo(referenceVideo, 0)
+    const imageDataUrl = referenceVideo ? captureVideoFrameDataUrl(referenceVideo) : null
 
     if (!imageDataUrl) {
       setMediapipeVeedError('Could not capture a reference image')

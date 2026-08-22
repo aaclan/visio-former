@@ -182,7 +182,8 @@ export function loadDetachedVideo(src: string): Promise<HTMLVideoElement> {
   })
 }
 
-function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
+/** Seeks a video element to `time` seconds and resolves once the frame there is decoded. */
+export function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
   return new Promise((resolve) => {
     const onSeeked = () => {
       video.removeEventListener('seeked', onSeeked)
@@ -204,7 +205,7 @@ function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
 export async function analyzeVideoAverageAngles(
   video: HTMLVideoElement,
   landmarker: PoseLandmarker,
-  sampleCount = 15,
+  sampleCount = 30,
 ): Promise<SessionStats> {
   const samples = createEmptyJointSamples()
   const timestampsMs: number[] = []
@@ -243,8 +244,16 @@ function tempoNote(userVelocity: number, referenceVelocity: number): string | nu
   if (referenceVelocity < MIN_REFERENCE_VELOCITY_DEG_PER_SEC) return null
   const ratio = userVelocity / referenceVelocity
 
-  if (ratio > TOO_FAST_RATIO) return 'you moved through it faster than the reference pace'
-  if (ratio < TOO_SLOW_RATIO) return 'you moved through it slower than the reference pace'
+  if (ratio > TOO_FAST_RATIO) {
+    return ratio > 2
+      ? 'you moved through it way too quickly compared to the reference pace'
+      : 'you moved through it a bit too quickly compared to the reference pace'
+  }
+  if (ratio < TOO_SLOW_RATIO) {
+    return ratio < 0.4
+      ? 'you moved through it way too slowly compared to the reference pace'
+      : 'you moved through it a bit too slowly compared to the reference pace'
+  }
   return null
 }
 
