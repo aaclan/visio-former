@@ -7,9 +7,11 @@ import { getBucket } from "./storage.js";
 import { captureFrames } from "./video.js";
 import { describeFrames } from "./vision.js";
 import { FORM_CLASSIFICATIONS, classifyDescriptions, compareClassifications } from "./pioneer.js";
+import { generateVeedVideo } from "./veed.js";
 
 const REFERENCE_PREFIX = "references/";
 const USER_VIDEO_PREFIX = "videos/";
+const REFERENCE_FRAME_PREFIX = "reference-frames/";
 const COMPARE_WINDOW_SECONDS = 4;
 const COMPARE_FRAME_INTERVAL_SECONDS = 0.4;
 const COMPARE_FRAME_COUNT = Math.round(COMPARE_WINDOW_SECONDS / COMPARE_FRAME_INTERVAL_SECONDS);
@@ -31,6 +33,19 @@ async function downloadFirstMatch(prefix: string, destination: string): Promise<
 async function frameToDataUri(filePath: string): Promise<string> {
   const buffer = await readFile(filePath);
   return `data:image/jpeg;base64,${buffer.toString("base64")}`;
+}
+
+/** Uploads the reference video's first frame to GCS and returns a short-lived signed URL to it. */
+async function storeReferenceFrame(framePath: string, objectId: string): Promise<string> {
+  const buffer = await readFile(framePath);
+  const gcsFile = getBucket().file(`${REFERENCE_FRAME_PREFIX}${objectId}.jpg`);
+  await gcsFile.save(buffer, { contentType: "image/jpeg", resumable: false });
+
+  const [url] = await gcsFile.getSignedUrl({
+    action: "read",
+    expires: Date.now() + 15 * 60 * 1000,
+  });
+  return url;
 }
 
 export async function registerCompareRoutes(app: FastifyInstance) {
@@ -108,7 +123,30 @@ export async function registerCompareRoutes(app: FastifyInstance) {
           FORM_CLASSIFICATIONS,
         );
 
-        return { feedback, referenceScores, userScores };
+        let referenceImageUrl: string | null = null;
+        let veedVideoUrl: string | null = null;
+        let veedError: string | undefined;
+
+        try {
+          const objectId = `${username}-${exerciseSlug}`;
+          referenceImageUrl = await storeReferenceFrame(referenceResult.frames[0].path, objectId);
+          const veed = await generateVeedVideo(referenceImageUrl, feedback, `${objectId}-advice.mp4`);
+          veedVideoUrl = veed.url;
+        } catch (err) {
+          request.log.warn(err, "failed to generate VEED advice video");
+          veedError = err instanceof Error ? err.message : "failed to generate advice video";
+        }
+
+        return {
+          feedback,
+          referenceScores,
+          userScores,
+          referenceDescriptions,
+          userDescriptions,
+          referenceImageUrl,
+          veedVideoUrl,
+          ...(veedError ? { veedError } : {}),
+        };
       } catch (err) {
         request.log.error(err);
         const message = err instanceof Error ? err.message : "comparison failed";

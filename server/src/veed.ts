@@ -1,0 +1,41 @@
+import { fal } from "@fal-ai/client";
+import { config } from "./config.js";
+import { getBucket } from "./storage.js";
+
+/**
+ * Generates a physiotherapist-style advice video via fal's veed/fabric-1.0/text model:
+ * an image (the reference exercise's first frame) narrating the given script text.
+ */
+export async function generateVeedVideo(
+  imageUrl: string,
+  text: string,
+  filename: string,
+  resolution: "480p" | "720p" = "720p",
+): Promise<{ url: string; filename: string }> {
+  if (!config.falKey) throw new Error("falKey is not configured in secrets.yaml");
+
+  fal.config({ credentials: config.falKey });
+  const result = await fal.subscribe("veed/fabric-1.0/text", {
+    input: { image_url: imageUrl, text, resolution },
+  });
+
+  const videoUrl = result.data.video?.url;
+  if (!videoUrl) throw new Error("VEED did not return a video URL");
+
+  const videoResponse = await fetch(videoUrl);
+  if (!videoResponse.ok) {
+    throw new Error(`Could not download VEED video (${videoResponse.status})`);
+  }
+
+  const file = getBucket().file(`videos/${filename}`);
+  await file.save(Buffer.from(await videoResponse.arrayBuffer()), {
+    resumable: false,
+    metadata: { contentType: result.data.video.content_type ?? "video/mp4" },
+  });
+
+  const [url] = await file.getSignedUrl({
+    action: "read",
+    expires: Date.now() + 15 * 60 * 1000,
+  });
+  return { url, filename };
+}
