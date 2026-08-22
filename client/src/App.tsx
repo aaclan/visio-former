@@ -31,7 +31,7 @@ function App() {
           Log out
         </button>
       </div>
-      <WebcamCapture />
+      <WebcamCapture token={token} />
     </>
   )
 }

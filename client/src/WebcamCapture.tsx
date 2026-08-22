@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 
-function WebcamCapture() {
+const RECORDING_MIME_TYPE = MediaRecorder.isTypeSupported('video/mp4')
+  ? 'video/mp4'
+  : 'video/webm'
+
+interface WebcamCaptureProps {
+  token: string
+}
+
+function WebcamCapture({ token }: WebcamCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -8,7 +16,12 @@ function WebcamCapture() {
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isRecording, setIsRecording] = useState(false)
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null)
   const [recordedUrl, setRecordedUrl] = useState<string | null>(null)
+
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [uploadedId, setUploadedId] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -50,13 +63,17 @@ function WebcamCapture() {
       URL.revokeObjectURL(recordedUrl)
       setRecordedUrl(null)
     }
+    setRecordedBlob(null)
+    setUploadedId(null)
+    setUploadError(null)
 
-    const recorder = new MediaRecorder(stream)
+    const recorder = new MediaRecorder(stream, { mimeType: RECORDING_MIME_TYPE })
     recorder.ondataavailable = (event) => {
       if (event.data.size > 0) chunksRef.current.push(event.data)
     }
     recorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: 'video/webm' })
+      const blob = new Blob(chunksRef.current, { type: RECORDING_MIME_TYPE })
+      setRecordedBlob(blob)
       setRecordedUrl(URL.createObjectURL(blob))
     }
 
@@ -68,6 +85,38 @@ function WebcamCapture() {
   const stopRecording = () => {
     mediaRecorderRef.current?.stop()
     setIsRecording(false)
+  }
+
+  const saveToBucket = async () => {
+    if (!recordedBlob) return
+
+    setIsUploading(true)
+    setUploadError(null)
+
+    try {
+      const ext = RECORDING_MIME_TYPE === 'video/mp4' ? 'mp4' : 'webm'
+      const formData = new FormData()
+      formData.append('video', recordedBlob, `recording.${ext}`)
+
+      const response = await fetch('http://localhost:3001/api/videos', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        setUploadError(data.error ?? 'Upload failed')
+        return
+      }
+
+      setUploadedId(data.id)
+    } catch {
+      setUploadError('Could not reach the server')
+    } finally {
+      setIsUploading(false)
+    }
   }
 
   if (error) {
@@ -100,9 +149,14 @@ function WebcamCapture() {
         <div className="webcam-playback">
           <h2>Recording</h2>
           <video src={recordedUrl} controls width={480} height={360} />
-          <a href={recordedUrl} download="recording.webm">
+          <a href={recordedUrl} download={`recording.${RECORDING_MIME_TYPE === 'video/mp4' ? 'mp4' : 'webm'}`}>
             Download recording
           </a>
+          <button type="button" onClick={saveToBucket} disabled={isUploading}>
+            {isUploading ? 'Saving…' : 'Save to bucket'}
+          </button>
+          {uploadedId && <p>Saved (id: {uploadedId})</p>}
+          {uploadError && <p role="alert">{uploadError}</p>}
         </div>
       )}
     </section>

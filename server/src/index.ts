@@ -1,16 +1,22 @@
-import "dotenv/config";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 import jwt from "jsonwebtoken";
 import { OAuth2Client } from "google-auth-library";
+import { config } from "./config.js";
 import { JWT_SECRET, verifyCredentials } from "./auth.js";
+import { registerVideoRoutes } from "./videos.js";
 
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? "";
+const GOOGLE_CLIENT_ID = config.googleClientId;
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 const app = Fastify({ logger: true });
 
 await app.register(cors, { origin: "http://localhost:5173" });
+await app.register(multipart, {
+  limits: { fileSize: 500 * 1024 * 1024 },
+});
+await registerVideoRoutes(app);
 
 app.get("/api/health", async () => {
   return { status: "ok" };
@@ -65,9 +71,7 @@ app.post("/api/login/google", async (request, reply) => {
   return { token };
 });
 
-const port = Number(process.env.PORT) || 3001;
-
-app.listen({ port }, (err) => {
+app.listen({ port: config.port }, (err) => {
   if (err) {
     app.log.error(err);
     process.exit(1);
