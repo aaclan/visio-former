@@ -45,11 +45,6 @@ gcsBucketName: ""                 # GCS bucket used for video storage
 googleApplicationCredentials: ""  # absolute path to a GCS service account JSON key
 demoUsername: "demo"              # demo login username
 demoPassword: "password123"       # demo login password (hashed in memory at startup)
-openaiApiKey: ""                  # OpenAI API key, used to caption exercise-form frames
-openaiVisionModel: "gpt-4o"       # vision-capable OpenAI model
-pioneerApiKey: ""                 # Pioneer (GLiNER2) API key, used to classify form descriptions
-pioneerBaseUrl: "https://api.pioneer.ai"
-pioneerModelId: "fastino/gliner2-base-v1"
 ```
 
 Never commit `server/secrets.yaml` — it's listed in `server/.gitignore`. To point the server at a secrets file in a different location, set `SECRETS_FILE=/path/to/file.yaml`.

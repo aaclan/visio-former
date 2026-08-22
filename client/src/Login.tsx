@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { GoogleLogin } from '@react-oauth/google'
+import Logo from './Logo'
 
 interface LoginProps {
   onLoginSuccess: (token: string) => void
@@ -64,7 +65,12 @@ function Login({ onLoginSuccess }: LoginProps) {
 
   return (
     <section id="login">
-      <h1>Log in</h1>
+      <Logo />
+      <div className="login-heading">
+        <p className="eyebrow">Movement feedback, made clear</p>
+        <h1>Welcome back</h1>
+        <p>Review your movement and turn each session into a more confident next step.</p>
+      </div>
       <form onSubmit={handleSubmit}>
         <label>
           Username

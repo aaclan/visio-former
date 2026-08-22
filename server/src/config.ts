@@ -9,11 +9,6 @@ interface Secrets {
   googleApplicationCredentials: string;
   demoUsername: string;
   demoPassword: string;
-  openaiApiKey: string;
-  openaiVisionModel: string;
-  pioneerApiKey: string;
-  pioneerBaseUrl: string;
-  pioneerModelId: string;
 }
 
 const SECRETS_FILE = process.env.SECRETS_FILE ?? new URL("../secrets.yaml", import.meta.url).pathname;
@@ -36,9 +31,4 @@ export const config: Secrets = {
   googleApplicationCredentials: loaded.googleApplicationCredentials ?? "",
   demoUsername: loaded.demoUsername ?? "demo",
   demoPassword: loaded.demoPassword ?? "password123",
-  openaiApiKey: loaded.openaiApiKey ?? "",
-  openaiVisionModel: loaded.openaiVisionModel ?? "gpt-4o",
-  pioneerApiKey: loaded.pioneerApiKey ?? "",
-  pioneerBaseUrl: loaded.pioneerBaseUrl ?? "https://api.pioneer.ai",
-  pioneerModelId: loaded.pioneerModelId ?? "fastino/gliner2-base-v1",
 };

@@ -22,9 +22,18 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
   const [isUploading, setIsUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadedId, setUploadedId] = useState<string | null>(null)
+  const [description, setDescription] = useState('')
+  const [submitted, setSubmitted] = useState(false)
+  const [isLoadingMedia, setIsLoadingMedia] = useState(false)
+  const [referenceVideoUrl, setReferenceVideoUrl] = useState<string | null>(null)
+  const [referenceVideoError, setReferenceVideoError] = useState<string | null>(null)
+  const [isLoadingReferenceVideo, setIsLoadingReferenceVideo] = useState(false)
 
   useEffect(() => {
+    if (!submitted) return
+
     let active = true
+    setIsLoadingMedia(true)
 
     navigator.mediaDevices
       .getUserMedia({ video: true, audio: true })
@@ -41,13 +50,48 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Could not access webcam')
       })
+      .finally(() => {
+        if (active) setIsLoadingMedia(false)
+      })
 
     return () => {
       active = false
       stream?.getTracks().forEach((track) => track.stop())
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [submitted])
+
+  useEffect(() => {
+    if (!submitted) return
+
+    let active = true
+    setIsLoadingReferenceVideo(true)
+    setReferenceVideoError(null)
+
+    fetch('http://localhost:3001/api/videos/reference', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (response) => {
+        const data = await response.json()
+        if (!active) return
+
+        if (!response.ok) {
+          setReferenceVideoError(data.error ?? 'Could not load reference video')
+          return
+        }
+        setReferenceVideoUrl(data.url)
+      })
+      .catch(() => {
+        if (active) setReferenceVideoError('Could not reach the server')
+      })
+      .finally(() => {
+        if (active) setIsLoadingReferenceVideo(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [submitted, token])
 
   useEffect(() => {
     return () => {
@@ -85,6 +129,22 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
   const stopRecording = () => {
     mediaRecorderRef.current?.stop()
     setIsRecording(false)
+  }
+
+  const resetToDescription = () => {
+    mediaRecorderRef.current?.stop()
+    stream?.getTracks().forEach((track) => track.stop())
+    if (recordedUrl) URL.revokeObjectURL(recordedUrl)
+
+    setStream(null)
+    setIsRecording(false)
+    setRecordedBlob(null)
+    setRecordedUrl(null)
+    setUploadedId(null)
+    setUploadError(null)
+    setReferenceVideoUrl(null)
+    setReferenceVideoError(null)
+    setSubmitted(false)
   }
 
   const saveToBucket = async () => {
@@ -129,21 +189,70 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
 
   return (
     <section id="webcam-capture">
-      <h1>Webcam Capture</h1>
+      <h1>Visio Former</h1>
 
-      <video ref={videoRef} autoPlay muted playsInline width={480} height={360} />
-
-      <div className="webcam-controls">
-        {!isRecording ? (
-          <button type="button" onClick={startRecording} disabled={!stream}>
-            Start recording
-          </button>
-        ) : (
-          <button type="button" onClick={stopRecording}>
-            Stop recording
-          </button>
-        )}
+      <div className="exercise-description">
+        {/* <label htmlFor="exercise-description-input"></label> */}
+        <div className="exercise-description-row">
+          <textarea
+            id="exercise-description-input"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Describe the exercise video you want to follow"
+            rows={3}
+            disabled={submitted}
+          />
+          {!submitted ? (
+            <button type="button" onClick={() => setSubmitted(true)}>
+              Let's do it!
+            </button>
+          ) : (
+            <button type="button" onClick={resetToDescription}>
+              Let's do another one!
+            </button>
+          )}
+        </div>
       </div>
+
+      {submitted && isLoadingMedia && <p>Loading…</p>}
+
+      {submitted && !isLoadingMedia && (
+        <>
+          <div className="capture-layout">
+            <div className="reference-column">
+              <h2>Reference video</h2>
+              {isLoadingReferenceVideo ? (
+                <div className="reference-video-placeholder">
+                  <p>Loading…</p>
+                </div>
+              ) : referenceVideoUrl ? (
+                <video src={referenceVideoUrl} controls width={480} height={360} />
+              ) : (
+                <div className="reference-video-placeholder">
+                  <p>{referenceVideoError ?? 'No reference video yet'}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="capture-column">
+              <h2>Webcam</h2>
+              <video ref={videoRef} autoPlay muted playsInline width={480} height={360} />
+
+              <div className="webcam-controls">
+                {!isRecording ? (
+                  <button type="button" onClick={startRecording} disabled={!stream}>
+                    Start recording
+                  </button>
+                ) : (
+                  <button type="button" onClick={stopRecording}>
+                    Stop recording
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       {recordedUrl && (
         <div className="webcam-playback">
@@ -153,7 +262,7 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
             Download recording
           </a>
           <button type="button" onClick={saveToBucket} disabled={isUploading}>
-            {isUploading ? 'Saving…' : 'Save to bucket'}
+            {isUploading ? 'Saving…' : 'Am I doing it right?'}
           </button>
           {uploadedId && <p>Saved (id: {uploadedId})</p>}
           {uploadError && <p role="alert">{uploadError}</p>}
