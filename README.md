@@ -45,11 +45,6 @@ gcsBucketName: ""                 # GCS bucket used for video storage
 googleApplicationCredentials: ""  # absolute path to a GCS service account JSON key
 demoUsername: "demo"              # demo login username
 demoPassword: "password123"       # demo login password (hashed in memory at startup)
-openaiApiKey: ""                  # OpenAI API key, used to caption exercise-form frames
-openaiVisionModel: "gpt-4o"       # vision-capable OpenAI model
-pioneerApiKey: ""                 # Pioneer (GLiNER2) API key, used to classify form descriptions
-pioneerBaseUrl: "https://api.pioneer.ai"
-pioneerModelId: "fastino/gliner2-base-v1"
 ```
 
 Never commit `server/secrets.yaml` — it's listed in `server/.gitignore`. To point the server at a secrets file in a different location, set `SECRETS_FILE=/path/to/file.yaml`.
@@ -79,21 +74,6 @@ All require `Authorization: Bearer <token>` from `/api/login` or `/api/login/goo
 - `POST /api/videos` — multipart upload, field name `video`, `.mp4` only, 500MB max. Returns `{ id, filename }`.
 - `GET /api/videos` — lists stored videos.
 - `GET /api/videos/:id` — returns a short-lived signed URL to read/download the video.
-
-### Form check
-
-The "Form Check" page compares a reference video against a video the user uploads. Pipeline for `POST /api/compare`:
-
-1. Drop the reference video (e.g. generated with fal) at `server/assets/reference-video.mp4`. The server also serves it back to the client at `GET /reference-video.mp4` for the preview player.
-2. The client uploads the user's video as multipart form data.
-3. The server extracts frames every 0.4s (10 frames, first 4s) from both videos with ffmpeg (`server/src/video.ts` — `captureFrames`, added by @Tiannan). The reference video's first frame is also uploaded to GCS at `reference-frames/reference.jpg` (overwritten each run) — non-fatal if `gcsBucketName` isn't configured.
-4. Each frame sequence is captioned into plain-text descriptions by OpenAI Vision (`server/src/vision.ts` — `describeFrames`), one call per video.
-5. Both sets of descriptions are classified against a fixed set of form categories (`FORM_CLASSIFICATIONS` in `server/src/pioneer.ts`) via a single call to Pioneer's GLiNER2 inference endpoint (`POST https://api.pioneer.ai/inference`).
-6. The reference vs. user classification confidences are averaged and diffed (`compareClassifications`) into plain-language feedback text, returned alongside the raw per-category scores (`referenceScores` / `userScores`) — that raw data is what a future fine-tuning dataset or VEED script would consume.
-
-Note: Pioneer's classification response shape isn't documented in detail, so `classifyDescriptions` parses defensively (accepts a couple of plausible shapes) — worth double-checking against a real response once `pioneerApiKey` is set.
-
-Routing the feedback onward — either into a fine-tuning dataset or to VEED to generate an advice video — is not implemented yet.
 
 ## Run in development
 
