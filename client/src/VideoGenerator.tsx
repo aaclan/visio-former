@@ -1,7 +1,6 @@
 import { useState } from 'react'
 
 function VideoGenerator({ token }: { token: string }) {
-  const [imageUrl, setImageUrl] = useState('')
   const [text, setText] = useState('')
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -20,7 +19,7 @@ function VideoGenerator({ token }: { token: string }) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ imageUrl, text, resolution: '720p' }),
+        body: JSON.stringify({ text, resolution: '720p' }),
       })
       const data = await response.json()
 
@@ -41,16 +40,6 @@ function VideoGenerator({ token }: { token: string }) {
     <section id="video-generator">
       <h1>Physio video</h1>
       <form onSubmit={generateVideo}>
-        <label>
-          Physio image URL
-          <input
-            type="url"
-            value={imageUrl}
-            onChange={(event) => setImageUrl(event.target.value)}
-            placeholder="https://.../physio.png"
-            required
-          />
-        </label>
         <label>
           What should the video say?
           <textarea

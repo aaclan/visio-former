@@ -1,13 +1,19 @@
 import { fal } from "@fal-ai/client";
 import { config } from "./config.js";
-import { getBucket } from "./storage.js";
+import { getBucket, getLatestFileUrl } from "./storage.js";
+
+const REFERENCE_IMAGE_PREFIX = "reference-frames/";
 
 export async function generateVeedVideo(
-  imageUrl: string,
   text: string,
   resolution: "480p" | "720p" = "720p",
 ): Promise<{ url: string; filename: string }> {
   if (!config.falKey) throw new Error("FAL_KEY is not configured");
+
+  const imageUrl = await getLatestFileUrl(REFERENCE_IMAGE_PREFIX);
+  if (!imageUrl) {
+    throw new Error(`no reference image found under ${REFERENCE_IMAGE_PREFIX}`);
+  }
 
   fal.config({ credentials: config.falKey });
   const result = await fal.subscribe("veed/fabric-1.0/text", {
