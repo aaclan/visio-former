@@ -1,7 +1,7 @@
 import { config } from "./config.js";
 
-/** Exercise-form categories a frame description is classified against. */
-export const FORM_CLASSIFICATIONS = [
+/** Fallback categories used if per-exercise category generation fails — generic and squat-biased. */
+export const DEFAULT_FORM_CLASSIFICATIONS = [
   "good_alignment",
   "knee_valgus",
   "excessive_forward_lean",
@@ -10,12 +10,21 @@ export const FORM_CLASSIFICATIONS = [
   "poor_tempo_control",
 ];
 
+const CLASSIFICATION_TASK = "exercise_form";
+
 export interface ClassificationResult {
   text: string;
-  labels: { label: string; confidence: number }[];
+  label: string;
+  confidence: number;
 }
 
-/** Classifies each text description against `classifications` via Pioneer's GLiNER2 inference endpoint. */
+/**
+ * Classifies each text description against `classifications` via Pioneer's standard (not
+ * fine-tuned) GLiNER2 inference endpoint. Confirmed live response shape:
+ *   { result: [{ data: { [task]: { label: string, confidence: number } } }, ...] }
+ * Pioneer picks a single winning label per text — not a score per category — so comparison
+ * below tallies how often each label wins across reference vs. user frames.
+ */
 export async function classifyDescriptions(
   texts: string[],
   classifications: string[],
@@ -33,7 +42,7 @@ export async function classifyDescriptions(
     body: JSON.stringify({
       model_id: config.pioneerModelId,
       text: texts,
-      schema: { classifications },
+      schema: { classifications: [{ task: CLASSIFICATION_TASK, labels: classifications }] },
     }),
   });
 
@@ -45,56 +54,30 @@ export async function classifyDescriptions(
   const data = (await response.json()) as { result?: unknown };
   const results = Array.isArray(data.result) ? data.result : [];
 
-  return texts.map((text, i) => ({
-    text,
-    labels: normalizeLabels(results[i]),
-  }));
+  return texts.map((text, i) => ({ text, ...parseClassification(results[i]) }));
 }
 
-/**
- * Pioneer's classification response shape isn't nailed down in the docs we have, so this
- * accepts either `{ classifications: [{label, confidence}] }` or a bare array of the same,
- * and tolerates `entity`/`score` as aliases for `label`/`confidence`.
- *
- * Note: a real Pioneer call using a `structures` schema (not `classifications`) has been
- * observed to return a flat, typed pose-attribute object instead (e.g. `trunk_position`,
- * `knee_flexion_near_deg`) with no per-field confidence score. If you switch FORM_CLASSIFICATIONS
- * over to a `structures` request, this parsing (and compareClassifications below) needs rework
- * to diff field values directly rather than average confidences.
- */
-function normalizeLabels(entry: unknown): { label: string; confidence: number }[] {
-  if (!entry) return [];
+function parseClassification(entry: unknown): { label: string; confidence: number } {
+  const data = (entry as { data?: Record<string, unknown> } | undefined)?.data;
+  const picked = data?.[CLASSIFICATION_TASK] as { label?: unknown; confidence?: unknown } | undefined;
 
-  const classifications = (entry as { classifications?: unknown }).classifications;
-  const source = Array.isArray(classifications) ? classifications : entry;
-  if (!Array.isArray(source)) return [];
-
-  const labels: { label: string; confidence: number }[] = [];
-  for (const item of source) {
-    if (!item || typeof item !== "object") continue;
-    const record = item as Record<string, unknown>;
-    const label = record.label ?? record.entity;
-    const confidence = record.confidence ?? record.score;
-    if (typeof label === "string" && typeof confidence === "number") {
-      labels.push({ label, confidence });
-    }
-  }
-  return labels;
+  return {
+    label: typeof picked?.label === "string" ? picked.label : "unclassified",
+    confidence: typeof picked?.confidence === "number" ? picked.confidence : 0,
+  };
 }
 
-/** Average confidence per classification across a set of frame results. */
-function averageConfidence(
+/** Fraction of results whose winning label was each classification. */
+function labelDistribution(
   results: ClassificationResult[],
   classifications: string[],
 ): Record<string, number> {
-  const sums: Record<string, number> = Object.fromEntries(classifications.map((c) => [c, 0]));
+  const counts: Record<string, number> = Object.fromEntries(classifications.map((c) => [c, 0]));
   for (const result of results) {
-    for (const { label, confidence } of result.labels) {
-      if (label in sums) sums[label] += confidence;
-    }
+    if (result.label in counts) counts[result.label] += 1;
   }
-  const count = results.length || 1;
-  return Object.fromEntries(classifications.map((c) => [c, sums[c] / count]));
+  const total = results.length || 1;
+  return Object.fromEntries(classifications.map((c) => [c, counts[c] / total]));
 }
 
 const SIGNIFICANT_DELTA = 0.2;
@@ -105,14 +88,14 @@ export interface FormComparison {
   userScores: Record<string, number>;
 }
 
-/** Compares reference vs. user classification averages and writes plain-language feedback. */
+/** Compares reference vs. user label distributions and writes plain-language feedback. */
 export function compareClassifications(
   referenceResults: ClassificationResult[],
   userResults: ClassificationResult[],
   classifications: string[],
 ): FormComparison {
-  const referenceScores = averageConfidence(referenceResults, classifications);
-  const userScores = averageConfidence(userResults, classifications);
+  const referenceScores = labelDistribution(referenceResults, classifications);
+  const userScores = labelDistribution(userResults, classifications);
 
   const lines: string[] = [];
   for (const label of classifications) {
@@ -125,8 +108,8 @@ export function compareClassifications(
 
     lines.push(
       delta > 0
-        ? `Your attempt shows more "${readable}" (${userPct}%) than the reference (${refPct}%) — work on correcting this.`
-        : `Your attempt shows less "${readable}" (${userPct}%) than the reference (${refPct}%) — good control here.`,
+        ? `Your attempt shows more "${readable}" (${userPct}% of frames) than the reference (${refPct}%) — work on correcting this.`
+        : `Your attempt shows less "${readable}" (${userPct}% of frames) than the reference (${refPct}%) — good control here.`,
     );
   }
 

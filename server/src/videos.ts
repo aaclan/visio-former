@@ -32,7 +32,7 @@ export async function registerVideoRoutes(app: FastifyInstance) {
     }
 
     try {
-      return await generateVeedVideo(text.trim(), resolution);
+      return await generateVeedVideo(text.trim(), { resolution });
     } catch (error) {
       request.log.error(error, "VEED video generation failed");
       const message = error instanceof Error ? error.message : "unknown error";
