@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Login from './Login'
 import WebcamCapture from './WebcamCapture'
+import VideoGenerator from './VideoGenerator'
 import Logo from './Logo'
 import './App.css'
 
@@ -35,6 +36,7 @@ function App() {
       </header>
       <main className="app-main">
         <WebcamCapture token={token} />
+        <VideoGenerator token={token} />
       </main>
     </>
   )

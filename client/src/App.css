@@ -315,6 +315,15 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 
 .app-main { flex: 1; }
 
+#video-generator { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 24px; }
+#video-generator form { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 480px; }
+#video-generator label { display: flex; flex-direction: column; gap: 4px; text-align: left; font-size: 14px; }
+#video-generator input,
+#video-generator textarea { box-sizing: border-box; font: inherit; padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+#video-generator textarea { min-height: 100px; resize: vertical; }
+#video-generator button { color: white; font-size: 16px; padding: 8px 16px; background: linear-gradient(90deg, var(--accent), var(--coral)); }
+#video-generator [role='alert'] { color: var(--coral); font-size: 14px; }
+
 @keyframes rise-in {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
