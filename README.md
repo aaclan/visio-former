@@ -1,5 +1,10 @@
 # visio-former
 
+Project Description: AI-powered physiotherapy guidance — real-time form correction for rehabilitation exercises
+
+Slide Deck link: https://gamma.app/docs/Visio-Former-f0cdhmqebhzd1ac
+****
+
 Monorepo with a React (Vite + TypeScript) frontend and a Fastify (TypeScript) backend.
 
 ```
