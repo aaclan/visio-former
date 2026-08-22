@@ -1,5 +1,7 @@
 # visio-former
 
+**Latest demo (Loom):** https://www.loom.com/share/98063191f5dd4340b34e1961a91b24a4 — this is the latest Loom link; our computer wasn't working properly so we weren't able to send the latest video while the link was still live.
+
 Project Description: AI-powered physiotherapy guidance — real-time form correction for rehabilitation exercises
 
 Slide Deck link: https://gamma.app/docs/Visio-Former-f0cdhmqebhzd1ac
