@@ -26,6 +26,10 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
   const [submitted, setSubmitted] = useState(false)
   const [isLoadingMedia, setIsLoadingMedia] = useState(false)
 
+  const [referenceUrl, setReferenceUrl] = useState<string | null>(null)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [generateError, setGenerateError] = useState<string | null>(null)
+
   useEffect(() => {
     if (!submitted) return
 
@@ -96,6 +100,39 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     setIsRecording(false)
   }
 
+  const startSession = async () => {
+    if (!description.trim()) return
+
+    setSubmitted(true)
+    setGenerateError(null)
+    setReferenceUrl(null)
+    setIsGenerating(true)
+
+    try {
+      const response = await fetch('http://localhost:3001/api/exercises/generate', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ exercise: description.trim() }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        setGenerateError(data.error ?? 'Could not generate the reference video')
+        return
+      }
+
+      setReferenceUrl(data.url)
+    } catch {
+      setGenerateError('Could not reach the server')
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
   const resetToDescription = () => {
     mediaRecorderRef.current?.stop()
     stream?.getTracks().forEach((track) => track.stop())
@@ -108,6 +145,8 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     setUploadedId(null)
     setUploadError(null)
     setSubmitted(false)
+    setReferenceUrl(null)
+    setGenerateError(null)
   }
 
   const saveToBucket = async () => {
@@ -166,7 +205,11 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
             disabled={submitted}
           />
           {!submitted ? (
-            <button type="button" onClick={() => setSubmitted(true)}>
+            <button
+              type="button"
+              onClick={startSession}
+              disabled={!description.trim()}
+            >
               Let's do it!
             </button>
           ) : (
@@ -184,9 +227,28 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
           <div className="capture-layout">
             <div className="reference-column">
               <h2>Reference video</h2>
-              <div className="reference-video-placeholder">
-                <p>No reference video yet</p>
-              </div>
+              {referenceUrl ? (
+                <video
+                  src={referenceUrl}
+                  controls
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  width={480}
+                  height={360}
+                />
+              ) : (
+                <div className="reference-video-placeholder">
+                  {isGenerating ? (
+                    <p>Generating your reference video — this takes a minute or two…</p>
+                  ) : (
+                    <p role={generateError ? 'alert' : undefined}>
+                      {generateError ?? 'No reference video yet'}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="capture-column">

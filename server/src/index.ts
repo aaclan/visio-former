@@ -6,6 +6,7 @@ import { OAuth2Client } from "google-auth-library";
 import { config } from "./config.js";
 import { JWT_SECRET, verifyCredentials } from "./auth.js";
 import { registerVideoRoutes } from "./videos.js";
+import { registerExerciseRoutes } from "./exercises.js";
 
 const GOOGLE_CLIENT_ID = config.googleClientId;
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
@@ -17,6 +18,7 @@ await app.register(multipart, {
   limits: { fileSize: 500 * 1024 * 1024 },
 });
 await registerVideoRoutes(app);
+await registerExerciseRoutes(app);
 
 app.get("/api/health", async () => {
   return { status: "ok" };
