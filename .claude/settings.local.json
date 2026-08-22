@@ -3,7 +3,10 @@
     "allow": [
       "Bash(npm -v)",
       "Bash(npm create *)",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(gh --version)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)"
     ]
   }
 }
