@@ -68,3 +68,51 @@ export async function describeFrames(frames: string[], label: string): Promise<s
 
   return parsed.descriptions as string[];
 }
+
+const CATEGORIES_SYSTEM_PROMPT = `You are a physiotherapist designing a classification schema for evaluating
+a specific exercise's form. Given an exercise name, output 6-8 short snake_case labels that a movement analyst
+could assign to a text description of a single frame from that exercise. Include exactly one positive label
+indicating correct form (e.g. "good_form"), and the rest should be specific, common form mistakes for that
+particular exercise's biomechanics — not generic labels borrowed from an unrelated exercise. For example, a
+bicep curl's mistakes involve the elbows/wrists/shoulders and momentum, not knees or hips; a squat's involve
+knees/hips/spine, not elbows. Labels must be short, snake_case, and specific enough to be distinguishable from
+each other by a zero-shot text classifier.`;
+
+const CATEGORIES_SCHEMA = {
+  type: "object",
+  properties: {
+    categories: { type: "array", items: { type: "string" } },
+  },
+  required: ["categories"],
+  additionalProperties: false,
+} as const;
+
+/** Generates exercise-specific form classification labels (one positive, several common-mistake labels). */
+export async function generateFormCategories(exercise: string): Promise<string[]> {
+  if (!config.openaiApiKey) {
+    throw new Error("openaiApiKey is not configured in secrets.yaml");
+  }
+  openai ??= new OpenAI({ apiKey: config.openaiApiKey });
+
+  const completion = await openai.chat.completions.create({
+    model: config.openaiVisionModel,
+    messages: [
+      { role: "system", content: CATEGORIES_SYSTEM_PROMPT },
+      { role: "user", content: `Exercise: ${exercise}` },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: { name: "form_categories", schema: CATEGORIES_SCHEMA, strict: true },
+    },
+    max_tokens: 300,
+  });
+
+  const raw = completion.choices[0]?.message?.content ?? "{}";
+  const parsed = JSON.parse(raw) as { categories?: unknown };
+
+  if (!Array.isArray(parsed.categories) || parsed.categories.length === 0) {
+    throw new Error("OpenAI did not return form categories");
+  }
+
+  return parsed.categories as string[];
+}

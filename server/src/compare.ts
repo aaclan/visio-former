@@ -5,8 +5,8 @@ import type { FastifyInstance } from "fastify";
 import { requireAuth } from "./auth.js";
 import { getBucket } from "./storage.js";
 import { captureFrames } from "./video.js";
-import { describeFrames } from "./vision.js";
-import { FORM_CLASSIFICATIONS, classifyDescriptions, compareClassifications } from "./pioneer.js";
+import { describeFrames, generateFormCategories } from "./vision.js";
+import { DEFAULT_FORM_CLASSIFICATIONS, classifyDescriptions, compareClassifications } from "./pioneer.js";
 import { generateVeedVideo } from "./veed.js";
 
 const REFERENCE_PREFIX = "references/";
@@ -81,6 +81,11 @@ export async function registerCompareRoutes(app: FastifyInstance) {
           });
         }
 
+        const categoriesPromise = generateFormCategories(request.params.exercise).catch((err) => {
+          request.log.warn(err, "failed to generate exercise-specific form categories, using defaults");
+          return DEFAULT_FORM_CLASSIFICATIONS;
+        });
+
         const extractOptions = {
           startSeconds: 0,
           durationSeconds: COMPARE_WINDOW_SECONDS,
@@ -110,18 +115,41 @@ export async function registerCompareRoutes(app: FastifyInstance) {
           describeFrames(userFrames, "user attempt"),
         ]);
 
+        console.log(`\n=== OpenAI Vision descriptions: ${username}/${exerciseSlug} ===`);
+        console.log("--- reference ---");
+        referenceDescriptions.forEach((d, i) => console.log(`  [${i}] ${d}`));
+        console.log("--- user attempt ---");
+        userDescriptions.forEach((d, i) => console.log(`  [${i}] ${d}`));
+
+        // Appended unconditionally (not left to the LLM) so a video that doesn't actually show the
+        // exercise — person not visible, sitting still, wrong movement — has somewhere to land instead
+        // of defaulting to the closest "good form" label by omission.
+        const classifications = [...(await categoriesPromise), "not_performing_exercise"];
+        console.log(`\n=== Form categories for "${request.params.exercise}" ===`, classifications);
+
         const combinedResults = await classifyDescriptions(
           [...referenceDescriptions, ...userDescriptions],
-          FORM_CLASSIFICATIONS,
+          classifications,
         );
         const referenceResults = combinedResults.slice(0, referenceDescriptions.length);
         const userResults = combinedResults.slice(referenceDescriptions.length);
 
+        console.log(`\n=== Pioneer classifications: ${username}/${exerciseSlug} ===`);
+        console.log("--- reference (per frame) ---");
+        referenceResults.forEach((r, i) => console.log(`  [${i}] ${r.label} (${(r.confidence * 100).toFixed(1)}%)`));
+        console.log("--- user attempt (per frame) ---");
+        userResults.forEach((r, i) => console.log(`  [${i}] ${r.label} (${(r.confidence * 100).toFixed(1)}%)`));
+
         const { feedback, referenceScores, userScores } = compareClassifications(
           referenceResults,
           userResults,
-          FORM_CLASSIFICATIONS,
+          classifications,
         );
+
+        console.log("--- distribution (fraction of frames per label) ---");
+        console.log("  reference:", referenceScores);
+        console.log("  user:     ", userScores);
+        console.log("  feedback:", feedback, "\n");
 
         let referenceImageUrl: string | null = null;
         let veedVideoUrl: string | null = null;
@@ -139,6 +167,7 @@ export async function registerCompareRoutes(app: FastifyInstance) {
 
         return {
           feedback,
+          classifications,
           referenceScores,
           userScores,
           referenceDescriptions,

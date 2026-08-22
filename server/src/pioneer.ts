@@ -1,7 +1,7 @@
 import { config } from "./config.js";
 
-/** Exercise-form categories a frame description is classified against. */
-export const FORM_CLASSIFICATIONS = [
+/** Fallback categories used if per-exercise category generation fails — generic and squat-biased. */
+export const DEFAULT_FORM_CLASSIFICATIONS = [
   "good_alignment",
   "knee_valgus",
   "excessive_forward_lean",
