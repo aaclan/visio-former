@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-function VideoGenerator() {
+function VideoGenerator({ token }: { token: string }) {
   const [imageUrl, setImageUrl] = useState('')
   const [text, setText] = useState('')
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
@@ -14,9 +14,12 @@ function VideoGenerator() {
     setIsGenerating(true)
 
     try {
-      const response = await fetch('http://localhost:3001/api/videos', {
+      const response = await fetch('http://localhost:3001/api/videos/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ imageUrl, text, resolution: '720p' }),
       })
       const data = await response.json()

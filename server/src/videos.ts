@@ -2,6 +2,7 @@ import { pipeline } from "node:stream/promises";
 import type { FastifyInstance } from "fastify";
 import { requireAuth } from "./auth.js";
 import { getBucket } from "./storage.js";
+import { generateVeedVideo } from "./veed.js";
 
 const OBJECT_PREFIX = "videos/";
 
@@ -16,6 +17,39 @@ function slugifyUsername(username: string): string {
 }
 
 export async function registerVideoRoutes(app: FastifyInstance) {
+  app.post("/api/videos/generate", { preHandler: requireAuth }, async (request, reply) => {
+    const { imageUrl, text, resolution } = (request.body ?? {}) as {
+      imageUrl?: string;
+      text?: string;
+      resolution?: "480p" | "720p";
+    };
+
+    if (!imageUrl?.trim() || !text?.trim()) {
+      return reply.code(400).send({ error: "imageUrl and text are required" });
+    }
+
+    try {
+      new URL(imageUrl);
+    } catch {
+      return reply.code(400).send({ error: "imageUrl must be a valid URL" });
+    }
+
+    if (resolution && !["480p", "720p"].includes(resolution)) {
+      return reply.code(400).send({ error: "resolution must be 480p or 720p" });
+    }
+
+    try {
+      return await generateVeedVideo(imageUrl.trim(), text.trim(), resolution);
+    } catch (error) {
+      request.log.error(error, "VEED video generation failed");
+      const message = error instanceof Error ? error.message : "unknown error";
+      const isConfigurationError = /not configured|credentials/i.test(message);
+      return reply.code(isConfigurationError ? 503 : 502).send({
+        error: isConfigurationError ? message : "VEED video generation failed",
+      });
+    }
+  });
+
   app.post("/api/videos", { preHandler: requireAuth }, async (request, reply) => {
     const file = await request.file();
 

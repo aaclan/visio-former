@@ -9,7 +9,7 @@ const storage = new Storage(
 
 export function getBucket() {
   if (!config.gcsBucketName) {
-    throw new Error("gcsBucketName is not configured in secrets.yaml");
+    throw new Error("gcsBucketName is not configured");
   }
   return storage.bucket(config.gcsBucketName);
 }

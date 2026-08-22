@@ -37,7 +37,7 @@ function App() {
       <main className="app-main">
         <WebcamCapture token={token} />
         <VideoGenerator token={token} />
-      </main>
+  </main>
     </>
   )
 }
