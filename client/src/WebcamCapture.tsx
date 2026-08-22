@@ -43,9 +43,6 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
           return
         }
         setStream(mediaStream)
-        if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream
-        }
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Could not access webcam')
@@ -60,6 +57,13 @@ function WebcamCapture({ token }: WebcamCaptureProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submitted])
+
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream
+      void videoRef.current.play().catch(() => {})
+    }
+  }, [stream, isLoadingMedia])
 
   useEffect(() => {
     return () => {
