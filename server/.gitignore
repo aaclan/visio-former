@@ -10,5 +10,3 @@ secrets.yaml
 *-gcs.json
 *service-account*.json
 *credentials*.json
-
-assets/reference-video.mp4

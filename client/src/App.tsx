@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Login from './Login'
-import FormCheck from './FormCheck'
+import WebcamCapture from './WebcamCapture'
+import Logo from './Logo'
 import './App.css'
 
 const TOKEN_STORAGE_KEY = 'auth_token'
@@ -26,12 +27,15 @@ function App() {
 
   return (
     <>
-      <div className="logout-bar">
+      <header className="app-header">
+        <Logo />
         <button type="button" onClick={handleLogout}>
           Log out
         </button>
-      </div>
-      <FormCheck />
+      </header>
+      <main className="app-main">
+        <WebcamCapture token={token} />
+      </main>
     </>
   )
 }

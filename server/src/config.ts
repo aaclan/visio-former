@@ -11,11 +11,6 @@ interface Secrets {
   demoUsername: string;
   demoPassword: string;
   falKey: string;
-  openaiApiKey: string;
-  openaiVisionModel: string;
-  pioneerApiKey: string;
-  pioneerBaseUrl: string;
-  pioneerModelId: string;
 }
 
 // fileURLToPath, not URL.pathname: on Windows the latter yields "/C:/..." and
@@ -43,9 +38,4 @@ export const config: Secrets = {
   demoUsername: loaded.demoUsername ?? "demo",
   demoPassword: loaded.demoPassword ?? "password123",
   falKey: loaded.falKey ?? "",
-  openaiApiKey: loaded.openaiApiKey ?? "",
-  openaiVisionModel: loaded.openaiVisionModel ?? "gpt-4o",
-  pioneerApiKey: loaded.pioneerApiKey ?? "",
-  pioneerBaseUrl: loaded.pioneerBaseUrl ?? "https://api.pioneer.ai",
-  pioneerModelId: loaded.pioneerModelId ?? "fastino/gliner2-base-v1",
 };

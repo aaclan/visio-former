@@ -35,8 +35,17 @@ export async function registerExerciseRoutes(app: FastifyInstance) {
       const id = `${username}-${exerciseSlug}`;
       const objectName = `${OBJECT_PREFIX}${id}.mp4`;
 
-      const gcsFile = getBucket().file(objectName);
-      const [alreadyStored] = await gcsFile.exists();
+      let gcsFile;
+      let alreadyStored: boolean;
+      try {
+        gcsFile = getBucket().file(objectName);
+        [alreadyStored] = await gcsFile.exists();
+      } catch (err) {
+        request.log.error(err);
+        return reply
+          .code(502)
+          .send({ error: "could not reach cloud storage — check the credentials in secrets.yaml" });
+      }
 
       // Generation costs real money per call, so an existing reference is reused.
       // Delete the object in the bucket to force a regeneration.
@@ -69,10 +78,18 @@ export async function registerExerciseRoutes(app: FastifyInstance) {
         }
       }
 
-      const [url] = await gcsFile.getSignedUrl({
-        action: "read",
-        expires: Date.now() + SIGNED_URL_TTL_MS,
-      });
+      let url: string;
+      try {
+        [url] = await gcsFile.getSignedUrl({
+          action: "read",
+          expires: Date.now() + SIGNED_URL_TTL_MS,
+        });
+      } catch (err) {
+        request.log.error(err);
+        return reply
+          .code(502)
+          .send({ error: "could not sign the reference video URL" });
+      }
 
       return reply.code(alreadyStored ? 200 : 201).send({
         id,
