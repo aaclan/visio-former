@@ -7,18 +7,21 @@ import { config } from "./config.js";
 import { JWT_SECRET, verifyCredentials } from "./auth.js";
 import { registerVideoRoutes } from "./videos.js";
 import { registerExerciseRoutes } from "./exercises.js";
+import { registerCompareRoutes } from "./compare.js";
 
 const GOOGLE_CLIENT_ID = config.googleClientId;
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+const UPLOAD_LIMIT_BYTES = 500 * 1024 * 1024;
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, bodyLimit: UPLOAD_LIMIT_BYTES });
 
 await app.register(cors, { origin: "http://localhost:5173" });
 await app.register(multipart, {
-  limits: { fileSize: 500 * 1024 * 1024 },
+  limits: { fileSize: UPLOAD_LIMIT_BYTES },
 });
 await registerVideoRoutes(app);
 await registerExerciseRoutes(app);
+await registerCompareRoutes(app);
 
 app.get("/api/health", async () => {
   return { status: "ok" };

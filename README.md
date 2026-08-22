@@ -45,6 +45,12 @@ gcsBucketName: ""                 # GCS bucket used for video storage
 googleApplicationCredentials: ""  # absolute path to a GCS service account JSON key
 demoUsername: "demo"              # demo login username
 demoPassword: "password123"       # demo login password (hashed in memory at startup)
+falKey: ""                        # fal.ai API key, used to generate reference videos
+openaiApiKey: ""                  # OpenAI API key, used to caption exercise-form frames
+openaiVisionModel: "gpt-4o"       # vision-capable OpenAI model
+pioneerApiKey: ""                 # Pioneer (GLiNER2) API key, used to classify form descriptions
+pioneerBaseUrl: "https://api.pioneer.ai"
+pioneerModelId: "fastino/gliner2-base-v1"
 ```
 
 Never commit `server/secrets.yaml` — it's listed in `server/.gitignore`. To point the server at a secrets file in a different location, set `SECRETS_FILE=/path/to/file.yaml`.
@@ -74,6 +80,19 @@ All require `Authorization: Bearer <token>` from `/api/login` or `/api/login/goo
 - `POST /api/videos` — multipart upload, field name `video`, `.mp4` only, 500MB max. Returns `{ id, filename }`.
 - `GET /api/videos` — lists stored videos.
 - `GET /api/videos/:id` — returns a short-lived signed URL to read/download the video.
+
+### Form comparison (server-side only, no client page yet)
+
+`POST /api/compare/:exercise` (auth required) compares the fal-generated reference video for `:exercise`
+against the signed-in user's recorded video — both already need to be in GCS beforehand:
+
+1. Generate the reference video first via `POST /api/exercises/generate` (stores it at `references/{username}-{exercise}.mp4`).
+2. Record and save an attempt via `POST /api/videos` (stores it at `videos/{username}-user-recording.{mp4|webm}`).
+3. `POST /api/compare/:exercise` downloads both from GCS, extracts frames every 0.4s (10 frames, first 4s) via ffmpeg (`server/src/video.ts` — `captureFrames`), captions each frame sequence into quantified pose descriptions via OpenAI Vision (`server/src/vision.ts` — `describeFrames`), then classifies both sets of descriptions against a fixed set of form categories (`FORM_CLASSIFICATIONS` in `server/src/pioneer.ts`) via a single call to Pioneer's GLiNER2 inference endpoint. Returns `{ feedback, referenceScores, userScores }`.
+
+404s tell you which of the two videos is missing. Pioneer's classification response shape isn't documented in detail, so `classifyDescriptions` parses defensively — worth double-checking once `pioneerApiKey` is set against a real call. (A real `structures`-schema Pioneer response has been seen to return a flat typed pose object with no per-field confidence — if `FORM_CLASSIFICATIONS` ever switches to that schema type, `compareClassifications` needs reworking to diff field values directly.)
+
+No client UI wires into this endpoint yet.
 
 ## Run in development
 
